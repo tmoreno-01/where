@@ -24,7 +24,7 @@ let drive=.95,driveGoal=.95,gather=0,gatherGoal=0,palette=0,paletteGoal=0,noise=
 let nextDecision=0,nextSample=0,observing=false,metrics=null,senseError=false,state='wake',stateSince=0,lightMood=0,lightGoal=0,pointerDown=false,exposure=1.0;
 const forced=params.get('mode');let wallTarget=v(.84,.72,.5);
 function environment(){
- const w=512,h=256,data=new Uint16Array(w*h*4);
+ const w=1024,h=512,data=new Uint16Array(w*h*4);
  // Broad neutral softbox plus narrow strip reflections and a darker surrounding studio.
  const boxes=[[.12,.36,.085,.22,5.8,6.1,6.5],[.34,.43,.022,.27,7.3,7.6,8.0],[.69,.34,.032,.23,6.9,5.6,4.5],[.61,.13,.22,.033,5.4,5.8,6.2],[.92,.59,.043,.16,2.0,3.0,4.3],[.51,.76,.14,.052,1.2,1.4,1.6]];
  const half=THREE.DataUtils.toHalfFloat;
@@ -42,8 +42,8 @@ function backdropTexture(){
  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;return tex;
 }
 const lightingPresets={
- sculptural:{key:2.35,rim:1.72,fill:.12,warm:.10,env:.33,exposure:.83,keyColor:0xfff1dd,rimColor:0xaccdff,fillColor:0x6b8cce,warmColor:0xe5a887},
- gloss:{key:1.35,rim:1.8,fill:.36,warm:.22,env:.68,exposure:.87,keyColor:0xfff5ed,rimColor:0xdbeaff,fillColor:0xb0c7ee,warmColor:0xffc39d},
+ sculptural:{key:1.85,rim:1.40,fill:.17,warm:.12,env:.66,exposure:.94,keyColor:0xfff1dd,rimColor:0xaccdff,fillColor:0x6b8cce,warmColor:0xe5a887},
+ gloss:{key:1.10,rim:1.45,fill:.25,warm:.18,env:.95,exposure:.94,keyColor:0xfff5ed,rimColor:0xdbeaff,fillColor:0xb0c7ee,warmColor:0xffc39d},
  studio:{key:2.25,rim:2.4,fill:.55,warm:.32,env:.40,exposure:.86,keyColor:0xfff1dc,rimColor:0xc9e1ff,fillColor:0x9cb6f7,warmColor:0xffb17a},
  contrast:{key:2.55,rim:3.05,fill:.19,warm:.18,env:.24,exposure:.76,keyColor:0xffffff,rimColor:0xb1d1ff,fillColor:0xa0b9f4,warmColor:0xffaf84},
  spectral:{key:1.65,rim:2.15,fill:.85,warm:.45,env:.29,exposure:.82,keyColor:0xe0f2ff,rimColor:0xb698ff,fillColor:0x83d9e6,warmColor:0xffa45d}
@@ -198,7 +198,7 @@ async function start(){
  renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ReinhardToneMapping;renderer.toneMappingExposure=.82;
  await renderer.init();if(!renderer.backend.isWebGPUBackend)throw Error('Unable to initialize the WebGPU backend.');
  renderer.shadowMap.enabled=conf.quality!=='mobile';renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.appendChild(renderer.domElement);
- scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.33;
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.66;
  camera=new THREE.OrthographicCamera(-1,1,.5,-.5,.015,10);camera.position.set(0,.5,-2.2);camera.lookAt(target);
  scene.add(new THREE.HemisphereLight(0xb8cff5,0x151f42,.13));
  light('key',0xfff4ec,1.65,v(-.85,1.65,-.95),conf.quality!=='mobile');

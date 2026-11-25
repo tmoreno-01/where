@@ -351,15 +351,12 @@ class mlsMpmSimulator {
             });
 
 
-            If(x.lessThan(int(2)).or(x.greaterThan(this.uniforms.gridSize.x.sub(int(2)))), () => {
-                vx.assign(0);
-            });
-            If(y.lessThan(int(2)).or(y.greaterThan(this.uniforms.gridSize.y.sub(int(2)))), () => {
-                vy.assign(0);
-            });
-            If(z.lessThan(int(2)).or(z.greaterThan(this.uniforms.gridSize.z.sub(int(2)))), () => {
-                vz.assign(0);
-            });
+            If(x.lessThan(int(3)),()=>{vx.assign(vx.max(0));});
+            If(x.greaterThanEqual(this.uniforms.gridSize.x.sub(int(3))),()=>{vx.assign(vx.min(0));});
+            If(y.lessThan(int(3)),()=>{vy.assign(vy.max(0));});
+            If(y.greaterThanEqual(this.uniforms.gridSize.y.sub(int(3))),()=>{vy.assign(vy.min(0));});
+            If(z.lessThan(int(3)),()=>{vz.assign(vz.max(0));});
+            If(z.greaterThanEqual(this.uniforms.gridSize.z.sub(int(3))),()=>{vz.assign(vz.min(0));});
 
             this.cellBufferF.element(instanceIndex).assign(vec4(vx,vy,vz,mass));
         })().compute(cellCount);
@@ -429,7 +426,9 @@ class mlsMpmSimulator {
             const center = particlePosition.sub(vec3(this.uniforms.gridSize).mul(0.5));
             // Broad screen-space expansion; keep depth coherent while permitting brief compression.
             const restoring = center.mul(vec3(this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.009).sub(0.005)));
-            const spreadPush=particlePosition.sub(this.uniforms.spreadCenter).mul(this.uniforms.spreadForce).clamp(-0.56,0.56);
+            const boundaryDistance=particlePosition.min(vec3(this.uniforms.gridSize).sub(particlePosition));
+            const spreadFade=boundaryDistance.sub(3).div(7).clamp(0,1);
+            const spreadPush=particlePosition.sub(this.uniforms.spreadCenter).mul(this.uniforms.spreadForce).clamp(-0.56,0.56).mul(spreadFade);
             const pulseR = particlePosition.sub(this.uniforms.pulseCenter);
             const impulse = pulseR.div(pulseR.length().max(2.0)).mul(this.uniforms.pulse).div(float(1).add(pulseR.dot(pulseR).div(380)));
             const normalizedPosition = particlePosition.div(vec3(this.uniforms.gridSize)).sub(0.5);
@@ -530,9 +529,17 @@ class mlsMpmSimulator {
             const split=this.uniforms.rareAxis.mul(rareR.dot(this.uniforms.rareAxis).mul(0.16).clamp(-1,1)).mul(0.9);
             const rareForce=select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
-            const edgeLow = vec3(6,6,5).sub(particlePosition).max(0);
-            const edgeHigh = particlePosition.sub(vec3(this.uniforms.gridSize).sub(vec3(6,6,5))).max(0);
-            particleVelocity.addAssign(edgeLow.sub(edgeHigh).mul(0.12).mul(this.uniforms.dt));
+            // A broad soft collision layer prevents planar accumulation.
+            const margin=vec3(8,8,6);
+            const edgeLow=margin.sub(particlePosition).div(margin.sub(2)).clamp(0,1);
+            const edgeHigh=particlePosition.sub(vec3(this.uniforms.gridSize).sub(margin)).div(margin.sub(2)).clamp(0,1);
+            const edgeNormal=edgeLow.mul(edgeLow).sub(edgeHigh.mul(edgeHigh));
+            particleVelocity.addAssign(edgeNormal.mul(2.8).mul(this.uniforms.dt));
+            const outwardLow=particleVelocity.min(0).mul(edgeLow.mul(edgeLow));
+            const outwardHigh=particleVelocity.max(0).mul(edgeHigh.mul(edgeHigh));
+            particleVelocity.subAssign(outwardLow.add(outwardHigh).mul(.34));
+            const boundaryCurl=vec3(edgeNormal.y.mul(particlePosition.z.mul(.16).add(time.mul(.12)).sin()),edgeNormal.x.mul(particlePosition.z.mul(.18).sub(time.mul(.13)).cos()),edgeNormal.x.add(edgeNormal.y).mul(particlePosition.y.mul(.12).sin())).mul(.31);
+            particleVelocity.addAssign(boundaryCurl.mul(this.uniforms.dt));
             // Recent disturbance slightly changes local mobility; slowly relaxes back.
             particleVelocity.mulAssign(float(0.997).add(oldMemory.mul(0.002).mul(this.uniforms.memoryEnabled)));
             particleVelocity.mulAssign(particleMass);
@@ -540,16 +547,18 @@ class mlsMpmSimulator {
 
             this.particleBuffer.element(instanceIndex).get('C').assign(B.mul(4));
             particlePosition.addAssign(particleVelocity.mul(this.uniforms.dt).add(directOffset));
-            particlePosition.assign(clamp(particlePosition, vec3(2), this.uniforms.gridSize.sub(2)));
-
-            // Dissipate only outward velocity on contact; do not repeatedly kick particles back into the wall.
-            const wallMin=vec3(2.015),wallMax=vec3(this.uniforms.gridSize).sub(2.015);
-            If(particlePosition.x.lessThan(wallMin.x),()=>{particleVelocity.x.assign(particleVelocity.x.max(0));});
-            If(particlePosition.x.greaterThan(wallMax.x),()=>{particleVelocity.x.assign(particleVelocity.x.min(0));});
-            If(particlePosition.y.lessThan(wallMin.y),()=>{particleVelocity.y.assign(particleVelocity.y.max(0));});
-            If(particlePosition.y.greaterThan(wallMax.y),()=>{particleVelocity.y.assign(particleVelocity.y.min(0));});
-            If(particlePosition.z.lessThan(wallMin.z),()=>{particleVelocity.z.assign(particleVelocity.z.max(0));});
-            If(particlePosition.z.greaterThan(wallMax.z),()=>{particleVelocity.z.assign(particleVelocity.z.min(0));});
+            // Reflect overshoot instead of projecting multiple particles onto one plane.
+            const wallMin=vec3(2.04),wallMax=vec3(this.uniforms.gridSize).sub(2.04);
+            const lo=wallMin.sub(particlePosition).max(0).toConst('wallLo');
+            const hi=particlePosition.sub(wallMax).max(0).toConst('wallHi');
+            particlePosition.addAssign(lo.sub(hi).mul(1.65));
+            If(lo.x.greaterThan(0),()=>{particleVelocity.x.assign(particleVelocity.x.abs().mul(.48).max(.28));});
+            If(hi.x.greaterThan(0),()=>{particleVelocity.x.assign(particleVelocity.x.abs().mul(-.48).min(-.28));});
+            If(lo.y.greaterThan(0),()=>{particleVelocity.y.assign(particleVelocity.y.abs().mul(.48).max(.28));});
+            If(hi.y.greaterThan(0),()=>{particleVelocity.y.assign(particleVelocity.y.abs().mul(-.48).min(-.28));});
+            If(lo.z.greaterThan(0),()=>{particleVelocity.z.assign(particleVelocity.z.abs().mul(.48).max(.28));});
+            If(hi.z.greaterThan(0),()=>{particleVelocity.z.assign(particleVelocity.z.abs().mul(-.48).min(-.28));});
+            particlePosition.assign(clamp(particlePosition,wallMin,wallMax));
 
             this.particleBuffer.element(instanceIndex).get('position').assign(particlePosition)
             this.particleBuffer.element(instanceIndex).get('velocity').assign(particleVelocity)
