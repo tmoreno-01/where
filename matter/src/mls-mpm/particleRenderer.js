@@ -112,7 +112,10 @@ class ParticleRenderer {
         this.defaultIndexCount = roundedBoxGeometry.index.count;
         this.shadowIndexCount = boxGeometry.index.count;
 
-        const mergedGeometry = BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
+        const mergedGeometry = conf.spheres
+            ? new THREE.SphereGeometry(0.61,conf.quality==='ultra'?7:10,conf.quality==='ultra'?5:7)
+            : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
+        if(conf.spheres){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
 
         this.geometry = new THREE.InstancedBufferGeometry().copy(mergedGeometry);
 
@@ -120,8 +123,8 @@ class ParticleRenderer {
         this.geometry.instanceCount = this.mlsMpmSim.numParticles;
 
         this.material = new THREE.MeshStandardNodeMaterial({
-            metalness: 0.73,
-            roughness: 0.27,
+            metalness: 0.51,
+            roughness: 0.23,
             //iridescence: 1.0,
         });
 
@@ -143,20 +146,22 @@ class ParticleRenderer {
             vAo.assign(particlePosition.z.div(95));
             vAo.assign(vAo.mul(vAo).oneMinus());
             const speed = particle.get('velocity').length().mul(0.28).clamp(0,1);
-            const local = attribute("position").xyz.mul(vec3(1,1,speed.mul(0.55).add(0.82)));
-            return mat.mul(local.mul(this.uniforms.size)).mul(particleDensity.mul(0.4).add(0.5).clamp(0.45,1)).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
+            const local = attribute("position").xyz;
+            const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).clamp(0.72,1.12);
+            if(conf.spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
+            return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
         })();
         this.material.colorNode = particle.get("color");
         this.material.aoNode = vAo;
-        this.material.normalNode = normalize(vNormal);
-        this.material.roughnessNode = particle.get('density').mul(0.10).add(0.19).clamp(0.19,0.48);
-        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().mul(0.075).clamp(0.0,0.19));
+        if(!conf.spheres)this.material.normalNode = normalize(vNormal);
+        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.11).add(0.19).clamp(0.19,0.43);
+        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.16).clamp(0.0,0.24));
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);
 
         this.object = new THREE.Mesh(this.geometry, this.material);
-        this.object.onBeforeShadow = () => { this.geometry.setDrawRange(this.defaultIndexCount, Infinity); }
+        this.object.onBeforeShadow = () => { if(!conf.spheres)this.geometry.setDrawRange(this.defaultIndexCount, Infinity); }
         this.object.onAfterShadow = () => { this.geometry.setDrawRange(0, this.defaultIndexCount); }
 
 

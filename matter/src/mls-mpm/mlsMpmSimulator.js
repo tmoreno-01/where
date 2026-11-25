@@ -33,7 +33,7 @@ class mlsMpmSimulator {
     gridCellSize = new THREE.Vector3(0,0,0);
     uniforms = {};
     kernels = {};
-    fixedPointMultiplier = 1e7;
+    fixedPointMultiplier = 1e6;
     mousePos = new THREE.Vector3();
     mousePosArray = [];
 
@@ -100,6 +100,20 @@ class mlsMpmSimulator {
         this.uniforms.drive = uniform(0.8);
         this.uniforms.palette = uniform(0.0);
         this.uniforms.gather = uniform(0.0);
+        this.uniforms.vortexC = uniform(new THREE.Vector3(12,22,28));
+        this.uniforms.vortexD = uniform(new THREE.Vector3(48,42,20));
+        this.uniforms.axisC = uniform(new THREE.Vector3(0,1,0));
+        this.uniforms.axisD = uniform(new THREE.Vector3(1,0,0));
+        this.uniforms.detailForce = uniform(0.75);
+        this.uniforms.pulse = uniform(0.0);
+        this.uniforms.pulseCenter = uniform(new THREE.Vector3());
+        this.uniforms.speedRef = uniform(1.8);
+        this.uniforms.colorMix = uniform(conf.densityOnly?0.0:1.0);
+        this.uniforms.pointer = uniform(new THREE.Vector3());
+        this.uniforms.pointerDelta = uniform(new THREE.Vector3());
+        this.uniforms.pointerActive = uniform(0.0);
+        this.uniforms.pointerPulse = uniform(0.0);
+        this.uniforms.clickCenter = uniform(new THREE.Vector3());
         this.uniforms.drift = uniform(new THREE.Vector3());
         this.uniforms.screenScale = uniform(1.0);
         this.uniforms.sampleStride = uniform(1,'uint');
@@ -300,9 +314,18 @@ class mlsMpmSimulator {
             const wb = float(1).div(float(1).add(rb.dot(rb).div(280))).toConst();
             const spinA = cross(this.uniforms.axisA,ra).mul(0.048).sub(ra.mul(0.008)).mul(wa);
             const spinB = cross(this.uniforms.axisB,rb).mul(0.048).sub(rb.mul(0.008)).mul(wb);
+            const rc = particlePosition.sub(this.uniforms.vortexC).toConst();
+            const rd = particlePosition.sub(this.uniforms.vortexD).toConst();
+            const wc = float(1).div(float(1).add(rc.dot(rc).div(125))).toConst();
+            const wd = float(1).div(float(1).add(rd.dot(rd).div(145))).toConst();
+            const spinC = cross(this.uniforms.axisC,rc).mul(0.105).sub(rc.mul(0.012)).mul(wc);
+            const spinD = cross(this.uniforms.axisD,rd).mul(0.095).sub(rd.mul(0.009)).mul(wd);
             const center = particlePosition.sub(vec3(this.uniforms.gridSize).mul(0.5));
             const restoring = center.mul(this.uniforms.gather.mul(-0.016).sub(0.002));
-            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(restoring).add(this.uniforms.drift).mul(this.uniforms.dt));
+            const pulseR = particlePosition.sub(this.uniforms.pulseCenter);
+            const impulse = pulseR.div(pulseR.length().max(2.0)).mul(this.uniforms.pulse).div(float(1).add(pulseR.dot(pulseR).div(380)));
+            const filament = vec3(center.y.mul(0.14).add(center.z.mul(0.06)).add(time.mul(0.36)).sin(),center.z.mul(0.18).sub(center.x.mul(0.12)).sub(time.mul(0.24)).sin(),center.x.mul(0.12).add(center.y.mul(0.15)).add(time.mul(0.28)).sin()).mul(0.17);
+            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(restoring).add(this.uniforms.drift).mul(this.uniforms.dt));
 
             const cellIndex =  ivec3(particlePosition).sub(1).toConst("cellIndex");
             const cellDiff = particlePosition.fract().sub(0.5).toConst("cellDiff");
@@ -336,12 +359,24 @@ class mlsMpmSimulator {
             const dist = cross(this.uniforms.mouseRayDirection, particlePosition.mul(vec3(this.uniforms.screenScale,1,0.65)).sub(this.uniforms.mouseRayOrigin)).length()
             const force = dist.mul(0.1).oneMinus().max(0.0).pow(2);
             //particleVelocity.assign(mix(particleVelocity, this.uniforms.mouseForce.mul(6), force));
-            particleVelocity.addAssign(this.uniforms.mouseForce.mul(1).mul(force));
+            // Pointer forces operate across the visible depth, not a single surface.
+            const pOffset = particlePosition.sub(this.uniforms.pointer).mul(vec3(this.uniforms.screenScale,1,0));
+            const pDist = pOffset.length().max(0.18);
+            const pUnit = pOffset.div(pDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
+            const influence = float(1).sub(pDist.div(14.0)).clamp(0,1).pow(2);
+            const delta = this.uniforms.pointerDelta;
+            const stir = delta.mul(2.8).add(pUnit.mul(2.2)).add(vec3(pUnit.y.negate(),pUnit.x,0).mul(delta.length().mul(0.58)));
+            particleVelocity.addAssign(stir.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt));
+            const clickOffset = particlePosition.sub(this.uniforms.clickCenter).mul(vec3(this.uniforms.screenScale,1,0));
+            const clickDist = clickOffset.length().max(0.18);
+            const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
+            const clickWeight = float(1).sub(clickDist.div(23.0)).clamp(0,1).pow(2);
+            particleVelocity.addAssign(clickDir.mul(clickWeight).mul(this.uniforms.pointerPulse).mul(this.uniforms.dt));
             const edgeLow = vec3(7,7,5).sub(particlePosition).max(0);
             const edgeHigh = particlePosition.sub(vec3(this.uniforms.gridSize).sub(vec3(7,7,5))).max(0);
             particleVelocity.addAssign(edgeLow.sub(edgeHigh).mul(0.16).mul(this.uniforms.dt));
             particleVelocity.mulAssign(particleMass);
-            particleVelocity.mulAssign(float(1).min(float(4.0).div(particleVelocity.length().max(0.001))));
+            particleVelocity.mulAssign(float(1).min(float(5.2).div(particleVelocity.length().max(0.001))));
 
             this.particleBuffer.element(instanceIndex).get('C').assign(B.mul(4));
             particlePosition.addAssign(particleVelocity.mul(this.uniforms.dt));
@@ -364,24 +399,27 @@ class mlsMpmSimulator {
             const direction = this.particleBuffer.element(instanceIndex).get('direction');
             direction.assign(mix(direction,particleVelocity, 0.1));
 
-            // Density is the primary pigment signal. Speed and strain modulate the response.
-            const den = particleDensity.div(this.uniforms.restDensity).clamp(0,2.0);
-            const vel = particleVelocity.length().mul(0.48).clamp(0,1);
-            const accel = particleVelocity.sub(prevVelocity).length().mul(2.4).clamp(0,1);
-            const directionTint = particleVelocity.x.div(particleVelocity.length().max(0.001)).mul(0.5).add(0.5);
-            const blend = den.mul(0.74).add(directionTint.sub(0.5).mul(0.11)).add(this.uniforms.palette.mul(0.06)).clamp(0,1);
-            const graphite = vec3(0.035,0.050,0.095);
-            const cobalt = vec3(0.075,0.22,0.64);
-            const petrol = vec3(0.045,0.48,0.52);
-            const copper = vec3(0.92,0.24,0.075);
-            const ivory = vec3(0.94,0.83,0.62);
-            const cool = mix(graphite,cobalt,blend.mul(3.3).clamp(0,1));
-            const middle = mix(cool,petrol,blend.sub(0.23).mul(3.9).clamp(0,1));
-            const hot = mix(copper,ivory,blend.sub(0.80).mul(5.0).clamp(0,1));
-            const pigment = mix(middle,hot,blend.sub(0.53).mul(3.3).clamp(0,1));
-            const energized = mix(pigment,vec3(0.78,0.89,1.0),accel.mul(0.16)).mul(vel.mul(0.32).add(0.78));
+            // Speed-led thermochromatic pigment, with density and acceleration modulation.
+            const den = particleDensity.div(this.uniforms.restDensity).clamp(0,1.7);
+            const speed = particleVelocity.length().div(this.uniforms.speedRef.max(0.25)).clamp(0,1.25);
+            const accel = particleVelocity.sub(prevVelocity).length().mul(2.0).clamp(0,1);
+            const heading = particleVelocity.x.div(particleVelocity.length().max(0.001)).mul(0.5).add(0.5);
+            const energetic = speed.mul(0.73).add(den.mul(0.15)).add(accel.mul(0.10)).add(heading.sub(0.5).mul(0.08));
+            const blend = mix(den.mul(0.74),energetic,this.uniforms.colorMix).clamp(0,1);
+            const obsidian = vec3(0.035,0.025,0.12);
+            const cobalt = vec3(0.11,0.085,0.78);
+            const jade = vec3(0.015,0.64,0.65);
+            const pink = vec3(0.85,0.045,0.36);
+            const amber = vec3(1.0,0.43,0.055);
+            const white = vec3(1.0,0.92,0.66);
+            const c0 = mix(obsidian,cobalt,blend.mul(5.0).clamp(0,1));
+            const c1 = mix(c0,jade,blend.sub(0.16).mul(5.3).clamp(0,1));
+            const c2 = mix(c1,pink,blend.sub(0.36).mul(5.0).clamp(0,1));
+            const c3 = mix(c2,amber,blend.sub(0.58).mul(4.6).clamp(0,1));
+            const pigment = mix(c3,white,blend.sub(0.82).mul(5.4).clamp(0,1));
+            const illuminated = mix(pigment,vec3(0.72,0.91,1.0),accel.mul(0.10)).mul(speed.mul(0.30).add(0.80));
             const oldColor = this.particleBuffer.element(instanceIndex).get('color');
-            const color = mix(oldColor,energized,0.12);
+            const color = mix(oldColor,illuminated,0.18);
             this.particleBuffer.element(instanceIndex).get('color').assign(color);
         })().compute(1);
         this.kernels.sample = Fn(() => {
