@@ -112,10 +112,12 @@ class ParticleRenderer {
         this.defaultIndexCount = roundedBoxGeometry.index.count;
         this.shadowIndexCount = boxGeometry.index.count;
 
-        const mergedGeometry = conf.spheres
-            ? new THREE.SphereGeometry(0.61,conf.particles>=200000?7:9,conf.particles>=200000?5:6)
-            : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
-        if(conf.spheres){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
+        const mergedGeometry = conf.capsules
+            ? new THREE.CapsuleGeometry(0.38,0.85,2,conf.particles>=200000?6:8,1).rotateX(Math.PI/2)
+            : conf.spheres
+                ? new THREE.SphereGeometry(0.61,conf.particles>=200000?7:9,conf.particles>=200000?5:6)
+                : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
+        if(conf.shape!=='rods'){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
 
         this.geometry = new THREE.InstancedBufferGeometry().copy(mergedGeometry);
 
@@ -149,6 +151,7 @@ class ParticleRenderer {
             const local = attribute("position").xyz;
             const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).clamp(0.72,1.12);
             if(conf.spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
+            if(conf.capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
             return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
         })();
         this.material.colorNode = particle.get("color");
@@ -161,7 +164,7 @@ class ParticleRenderer {
         //this.material.envNode = vec3(0.5);
 
         this.object = new THREE.Mesh(this.geometry, this.material);
-        this.object.onBeforeShadow = () => { if(!conf.spheres)this.geometry.setDrawRange(this.defaultIndexCount, Infinity); }
+        this.object.onBeforeShadow = () => { if(conf.shape==='rods')this.geometry.setDrawRange(this.defaultIndexCount, Infinity); }
         this.object.onAfterShadow = () => { this.geometry.setDrawRange(0, this.defaultIndexCount); }
 
 
