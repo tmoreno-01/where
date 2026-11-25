@@ -11,7 +11,7 @@ origins.push(v(.30,.72,.28).multiply(grid),v(.70,.29,.75).multiply(grid));
 goals.push(origins[2].clone(),origins[3].clone());
 const axes=[v(.2,.4,1).normalize(),v(-.4,.6,-1).normalize(),v(.4,1,.3).normalize(),v(-1,.4,.5).normalize()],axisGoals=axes.map(x=>x.clone());
 const pointer=v(),pointerDelta=v(),pointerGoal=v(),clickCenter=v(),pulseCenter=v();
-let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=4,speedRef=1.8;
+let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=4,speedRef=1.3;
 const drift=v(),driftGoal=v(),recent=[],lightRig={};
 let renderer,sim,particles,camera,scene,raf=0,previous=0,age=0,frame=0,ratio=1,perfStart=0,perfFrames=0,paused=false,running=false,dead=false;
 let drive=.95,driveGoal=.95,gather=0,gatherGoal=0,palette=0,paletteGoal=0,noise=.75,noiseGoal=.75;
@@ -31,7 +31,7 @@ function environment(){
 }
 function light(name,color,intensity,pos,shadow=false){
  const l=new THREE.DirectionalLight(color,intensity);l.position.copy(pos);l.target.position.copy(target);scene.add(l,l.target);lightRig[name]=l;
- if(shadow){l.castShadow=true;l.shadow.mapSize.set(1536,1536);Object.assign(l.shadow.camera,{left:-2,right:2,top:1.4,bottom:-1.4,near:.02,far:6});l.shadow.camera.updateProjectionMatrix();l.shadow.bias=-.00035;l.shadow.normalBias=.0015;}
+ if(shadow){l.castShadow=true;l.shadow.mapSize.set(conf.particles>=200000?1024:1536,conf.particles>=200000?1024:1536);Object.assign(l.shadow.camera,{left:-2,right:2,top:1.4,bottom:-1.4,near:.02,far:6});l.shadow.camera.updateProjectionMatrix();l.shadow.bias=-.00035;l.shadow.normalBias=.0015;}
  return l;
 }
 const modes=['gather','unfold','divide','orbit','wall','rest','shear','braid','burst'];
@@ -74,17 +74,17 @@ function direct(dt){
  detail+=(detailGoal-detail)*a;u.detailForce.value=detail;
  if(age>=nextPulse){nextPulse=age+rand(8,20);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(1.25,2.6);}}
  pulse*=Math.exp(-dt*1.1);u.pulse.value=pulse;u.pulseCenter.value.copy(pulseCenter);
- speedRef+=(clamp((metrics?.speed||1.1)*1.85,.85,3.5)-speedRef)*(1-Math.exp(-dt*.16));u.speedRef.value=speedRef;
+ speedRef+=(clamp((metrics?.speed||1.1)*1.12,.55,4.5)-speedRef)*(1-Math.exp(-dt*.16));u.speedRef.value=speedRef;
  pointerDelta.lerp(pointerGoal,1-Math.exp(-dt*20));pointerGoal.multiplyScalar(Math.exp(-dt*8));
  pointerStrength+=((pointerDown?1:0)-pointerStrength)*(1-Math.exp(-dt*15));
  pointerPulse*=Math.exp(-dt*3.2);
  u.pointer.value.copy(pointer);u.pointerDelta.value.copy(pointerDelta);u.pointerActive.value=pointerStrength;u.pointerPulse.value=pointerPulse;u.clickCenter.value.copy(clickCenter);
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
- lightRig.key.intensity=2.2+lightMood*.30;lightRig.rim.intensity=2.9+activity*.65;lightRig.fill.intensity=.85-lightMood*.19;lightRig.warm.intensity=.9+activity*.4;
+ lightRig.key.intensity=1.65+lightMood*.18;lightRig.rim.intensity=1.85+activity*.35;lightRig.fill.intensity=.60-lightMood*.13;lightRig.warm.intensity=.46+activity*.22;
  lightRig.key.position.set(-.85+Math.sin(age*.031)*.24,1.65,-.95);
  lightRig.rim.position.set(.9+Math.sin(age*.027)*.2,.88,.95);
- exposure+=(1.04-activity*.08-exposure)*(1-Math.exp(-dt*.2));renderer.toneMappingExposure=exposure;
+ exposure+=(.82-activity*.05-exposure)*(1-Math.exp(-dt*.2));renderer.toneMappingExposure=exposure;
 }
 function resize(){
  if(!renderer||!camera)return;
@@ -115,15 +115,15 @@ async function loop(now){
 async function start(){
  if(!navigator.gpu)throw Error('WebGPU is unavailable.');
  renderer=new THREE.WebGPURenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
- ratio=Math.min(devicePixelRatio||1,innerWidth<700?1.15:1.5);
- renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;
+ ratio=Math.min(devicePixelRatio||1,conf.quality==='mobile'?.85:conf.particles>=200000?1.0:1.25);
+ renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ReinhardToneMapping;renderer.toneMappingExposure=.82;
  await renderer.init();if(!renderer.backend.isWebGPUBackend)throw Error('Unable to initialize the WebGPU backend.');
- renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.appendChild(renderer.domElement);
- scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.71;
+ renderer.shadowMap.enabled=conf.quality!=='mobile';renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.appendChild(renderer.domElement);
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.32;
  camera=new THREE.OrthographicCamera(-1,1,.5,-.5,.015,10);camera.position.set(0,.5,-2.2);camera.lookAt(target);
- scene.add(new THREE.HemisphereLight(0xe1ebff,0x262132,.48));
- light('key',0xfff4ec,2.2,v(-.85,1.65,-.95),true);
- light('fill',0xa9c9ff,.85,v(-1.1,.35,-.7));light('rim',0xe7f1ff,3.0,v(.95,.88,.95));light('warm',0xffad73,1.35,v(.15,-.6,.25));
+ scene.add(new THREE.HemisphereLight(0xd6e2ff,0x40233b,.48));
+ light('key',0xfff4ec,1.65,v(-.85,1.65,-.95),conf.quality!=='mobile');
+ light('fill',0xa9c9ff,.60,v(-1.1,.35,-.7));light('rim',0xe7f1ff,1.85,v(.95,.88,.95));light('warm',0xffad73,.46,v(.15,-.6,.25));
  const backdrop=new THREE.Mesh(new THREE.PlaneGeometry(12,12),new THREE.MeshStandardMaterial({color:0x151922,roughness:.88,metalness:0}));
  backdrop.position.set(0,.5,.68);backdrop.rotation.y=Math.PI;backdrop.receiveShadow=true;scene.add(backdrop);
  sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim);scene.add(particles.object);
@@ -141,7 +141,7 @@ async function start(){
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,shape:conf.spheres?'spheres':'rods'});
+ window.sculptureStatus=()=>({frame,age,particles:conf.particles,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,quality:conf.quality,shape:conf.spheres?'spheres':'rods'});
  schedule();
 }
 start().catch(fail);

@@ -113,7 +113,7 @@ class ParticleRenderer {
         this.shadowIndexCount = boxGeometry.index.count;
 
         const mergedGeometry = conf.spheres
-            ? new THREE.SphereGeometry(0.61,conf.quality==='ultra'?7:10,conf.quality==='ultra'?5:7)
+            ? new THREE.SphereGeometry(0.61,conf.particles>=200000?7:9,conf.particles>=200000?5:6)
             : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
         if(conf.spheres){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
 
@@ -123,8 +123,8 @@ class ParticleRenderer {
         this.geometry.instanceCount = this.mlsMpmSim.numParticles;
 
         this.material = new THREE.MeshStandardNodeMaterial({
-            metalness: 0.51,
-            roughness: 0.23,
+            metalness: 0.33,
+            roughness: 0.39,
             //iridescence: 1.0,
         });
 
@@ -141,8 +141,8 @@ class ParticleRenderer {
 
             //return attribute("position").xyz.mul(10).add(vec3(32,32,0));
             //return attribute("position").xyz.mul(0.1).add(positionAttribute.mul(vec3(1,1,0.4)));
-            const mat = calcLookAtMatrix(particleDirection.xyz);
-            vNormal.assign(transformNormalToView(mat.mul(normalLocal)));
+            const mat = conf.spheres ? null : calcLookAtMatrix(particleDirection.xyz);
+            if(!conf.spheres)vNormal.assign(transformNormalToView(mat.mul(normalLocal)));
             vAo.assign(particlePosition.z.div(95));
             vAo.assign(vAo.mul(vAo).oneMinus());
             const speed = particle.get('velocity').length().mul(0.28).clamp(0,1);
@@ -154,8 +154,8 @@ class ParticleRenderer {
         this.material.colorNode = particle.get("color");
         this.material.aoNode = vAo;
         if(!conf.spheres)this.material.normalNode = normalize(vNormal);
-        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.11).add(0.19).clamp(0.19,0.43);
-        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.16).clamp(0.0,0.24));
+        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.075).add(0.34).clamp(0.34,0.52);
+        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.055).clamp(0.0,0.085));
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);
@@ -170,7 +170,7 @@ class ParticleRenderer {
         const s = (1/64);
         this.object.position.set(-conf.gridX*0.5*s,0,0);
         this.object.scale.set(s,s,s);
-        this.object.castShadow = true;
+        this.object.castShadow = conf.quality!=='mobile';
         this.object.receiveShadow = true;
     }
 

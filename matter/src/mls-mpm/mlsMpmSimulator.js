@@ -109,6 +109,7 @@ class mlsMpmSimulator {
         this.uniforms.pulseCenter = uniform(new THREE.Vector3());
         this.uniforms.speedRef = uniform(1.8);
         this.uniforms.colorMix = uniform(conf.densityOnly?0.0:1.0);
+        this.uniforms.paletteMode = uniform(conf.paletteMode);
         this.uniforms.pointer = uniform(new THREE.Vector3());
         this.uniforms.pointerDelta = uniform(new THREE.Vector3());
         this.uniforms.pointerActive = uniform(0.0);
@@ -399,27 +400,37 @@ class mlsMpmSimulator {
             const direction = this.particleBuffer.element(instanceIndex).get('direction');
             direction.assign(mix(direction,particleVelocity, 0.1));
 
-            // Speed-led thermochromatic pigment, with density and acceleration modulation.
-            const den = particleDensity.div(this.uniforms.restDensity).clamp(0,1.7);
-            const speed = particleVelocity.length().div(this.uniforms.speedRef.max(0.25)).clamp(0,1.25);
-            const accel = particleVelocity.sub(prevVelocity).length().mul(2.0).clamp(0,1);
-            const heading = particleVelocity.x.div(particleVelocity.length().max(0.001)).mul(0.5).add(0.5);
-            const energetic = speed.mul(0.73).add(den.mul(0.15)).add(accel.mul(0.10)).add(heading.sub(0.5).mul(0.08));
-            const blend = mix(den.mul(0.74),energetic,this.uniforms.colorMix).clamp(0,1);
-            const obsidian = vec3(0.035,0.025,0.12);
-            const cobalt = vec3(0.11,0.085,0.78);
-            const jade = vec3(0.015,0.64,0.65);
-            const pink = vec3(0.85,0.045,0.36);
-            const amber = vec3(1.0,0.43,0.055);
-            const white = vec3(1.0,0.92,0.66);
-            const c0 = mix(obsidian,cobalt,blend.mul(5.0).clamp(0,1));
-            const c1 = mix(c0,jade,blend.sub(0.16).mul(5.3).clamp(0,1));
-            const c2 = mix(c1,pink,blend.sub(0.36).mul(5.0).clamp(0,1));
-            const c3 = mix(c2,amber,blend.sub(0.58).mul(4.6).clamp(0,1));
-            const pigment = mix(c3,white,blend.sub(0.82).mul(5.4).clamp(0,1));
-            const illuminated = mix(pigment,vec3(0.72,0.91,1.0),accel.mul(0.10)).mul(speed.mul(0.30).add(0.80));
+            // Soft-knee speed normalization preserves gradients even during fast impacts.
+            const den = particleDensity.div(this.uniforms.restDensity).clamp(0,2.0);
+            const rawSpeed = particleVelocity.length().div(this.uniforms.speedRef.max(0.25));
+            const speed = rawSpeed.div(rawSpeed.add(0.58)).clamp(0,1);
+            const accel = particleVelocity.sub(prevVelocity).length().mul(1.8).clamp(0,1);
+            const heading = particleVelocity.x.div(particleVelocity.length().max(0.001));
+            const energy = speed.mul(0.86).add(den.div(den.add(1)).mul(0.12)).add(accel.mul(0.07)).add(heading.mul(0.035));
+            const densitySignal = den.div(den.add(0.50));
+            const t = mix(densitySignal,energy,this.uniforms.colorMix).add(this.uniforms.palette.mul(0.028)).clamp(0,1);
+            // These are bounded linear-light pigment values, not emissive whites.
+            const violet = vec3(0.12,0.012,0.35);
+            const blue = vec3(0.018,0.085,0.72);
+            const aqua = vec3(0.006,0.44,0.56);
+            const acid = vec3(0.48,0.67,0.018);
+            const orange = vec3(0.82,0.125,0.012);
+            const fuchsia = vec3(0.68,0.014,0.27);
+            const c0 = mix(violet,blue,t.mul(5.5).clamp(0,1));
+            const c1 = mix(c0,aqua,t.sub(0.18).mul(5.0).clamp(0,1));
+            const c2 = mix(c1,acid,t.sub(0.38).mul(5.0).clamp(0,1));
+            const c3 = mix(c2,orange,t.sub(0.58).mul(5.0).clamp(0,1));
+            const spectrum = mix(c3,fuchsia,t.sub(0.78).mul(4.55).clamp(0,1));
+            const acidA = mix(vec3(0.065,0.008,0.18),vec3(0.015,0.32,0.34),t.mul(2.5).clamp(0,1));
+            const acidB = mix(acidA,vec3(0.50,0.68,0.012),t.sub(0.40).mul(2.9).clamp(0,1));
+            const acidC = mix(acidB,vec3(0.86,0.19,0.025),t.sub(0.79).mul(4.8).clamp(0,1));
+            const emberA = mix(vec3(0.035,0.018,0.24),vec3(0.39,0.015,0.35),t.mul(2.8).clamp(0,1));
+            const emberB = mix(emberA,vec3(0.79,0.045,0.075),t.sub(0.35).mul(3.0).clamp(0,1));
+            const emberC = mix(emberB,vec3(0.85,0.36,0.018),t.sub(0.68).mul(3.13).clamp(0,1));
+            const pigment = mix(mix(spectrum,acidC,select(this.uniforms.paletteMode.equal(1),float(1),float(0))),emberC,select(this.uniforms.paletteMode.equal(2),float(1),float(0)));
+            const illuminated = pigment.mul(speed.mul(0.28).add(0.80)).mul(accel.mul(0.13).add(0.94));
             const oldColor = this.particleBuffer.element(instanceIndex).get('color');
-            const color = mix(oldColor,illuminated,0.18);
+            const color = mix(oldColor,illuminated,0.16);
             this.particleBuffer.element(instanceIndex).get('color').assign(color);
         })().compute(1);
         this.kernels.sample = Fn(() => {
