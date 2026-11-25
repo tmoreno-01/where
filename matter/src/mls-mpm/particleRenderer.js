@@ -126,8 +126,8 @@ class ParticleRenderer {
         this.geometry.instanceCount = this.mlsMpmSim.numParticles;
 
         this.material = new THREE.MeshStandardNodeMaterial({
-            metalness: 0.33,
-            roughness: 0.39,
+            metalness: 0.48,
+            roughness: 0.30,
             //iridescence: 1.0,
         });
 
@@ -158,8 +158,8 @@ class ParticleRenderer {
         this.material.colorNode = particle.get("color");
         this.material.aoNode = vAo;
         if(!spheres)this.material.normalNode = normalize(vNormal);
-        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.075).add(0.34).sub(particle.get('memory').mul(0.12)).clamp(0.23,0.52);
-        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.055).clamp(0.0,0.085).add(particle.get('signal').mul(0.19)));
+        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.07).add(0.27).sub(particle.get('memory').mul(0.08)).clamp(0.22,0.44);
+        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.055).clamp(0.0,0.085).add(particle.get('signal').mul(0.13)));
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);

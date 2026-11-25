@@ -117,6 +117,9 @@ class mlsMpmSimulator {
         this.uniforms.colorMix = uniform(conf.densityOnly?0.0:1.0);
         this.uniforms.paletteMode = uniform(conf.paletteMode);
         this.uniforms.pointer = uniform(new THREE.Vector3());
+        this.uniforms.pointerPrevious = uniform(new THREE.Vector3());
+        this.uniforms.pointerDrag = uniform(0.0);
+        this.uniforms.clickImpulse = uniform(0.0);
         this.uniforms.pointerDelta = uniform(new THREE.Vector3());
         this.uniforms.pointerActive = uniform(0.0);
         this.uniforms.pointerPulse = uniform(0.0);
@@ -411,18 +414,23 @@ class mlsMpmSimulator {
             const force = dist.mul(0.1).oneMinus().max(0.0).pow(2);
             //particleVelocity.assign(mix(particleVelocity, this.uniforms.mouseForce.mul(6), force));
             // Pointer forces operate across the visible depth, not a single surface.
-            const pOffset = particlePosition.sub(this.uniforms.pointer).mul(vec3(this.uniforms.screenScale,1,0));
+            const screenUnits=vec3(this.uniforms.screenScale,1,0);
+            const segment=this.uniforms.pointer.sub(this.uniforms.pointerPrevious).mul(screenUnits);
+            const fromStart=particlePosition.sub(this.uniforms.pointerPrevious).mul(screenUnits);
+            const along=fromStart.dot(segment).div(segment.dot(segment).max(0.001)).clamp(0,1);
+            const pOffset=fromStart.sub(segment.mul(along));
             const pDist = pOffset.length().max(0.18);
             const pUnit = pOffset.div(pDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
             const influence = float(1).sub(pDist.div(12.5)).clamp(0,1).pow(2);
             const delta = this.uniforms.pointerDelta;
-            const stir = delta.mul(1.25).add(pUnit.mul(0.85)).add(vec3(pUnit.y.negate(),pUnit.x,0).mul(delta.length().mul(0.26)));
-            particleVelocity.addAssign(stir.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt));
+            const stir = delta.mul(0.30).add(pUnit.mul(0.19)).add(vec3(pUnit.y.negate(),pUnit.x,0).mul(delta.length().mul(0.055)));
+            particleVelocity.addAssign(stir.mul(influence).mul(this.uniforms.pointerDrag));
+            particleVelocity.addAssign(pUnit.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt).mul(0.32));
             const clickOffset = particlePosition.sub(this.uniforms.clickCenter).mul(vec3(this.uniforms.screenScale,1,0));
             const clickDist = clickOffset.length().max(0.18);
             const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
             const clickWeight = float(1).sub(clickDist.div(17.0)).clamp(0,1).pow(2);
-            particleVelocity.addAssign(clickDir.mul(clickWeight).mul(this.uniforms.pointerPulse).mul(this.uniforms.dt));
+            particleVelocity.addAssign(clickDir.mul(clickWeight).mul(this.uniforms.clickImpulse));
             const np=nervePos(particlePosition).toConst('nerveCell');
             const incoming=neighbor(np,0,0,0).mul(0.65).max(neighbor(np,1,0,0)).max(neighbor(np,-1,0,0)).max(neighbor(np,0,1,0)).max(neighbor(np,0,-1,0)).max(neighbor(np,0,0,1)).max(neighbor(np,0,0,-1));
             const sourceR=particlePosition.sub(this.uniforms.nerveSource);
