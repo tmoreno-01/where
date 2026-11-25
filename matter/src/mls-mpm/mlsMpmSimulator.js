@@ -421,16 +421,24 @@ class mlsMpmSimulator {
             const pOffset=fromStart.sub(segment.mul(along));
             const pDist = pOffset.length().max(0.18);
             const pUnit = pOffset.div(pDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
-            const influence = float(1).sub(pDist.div(12.5)).clamp(0,1).pow(2);
+            const influence = float(1).sub(pDist.div(11.5).pow(2)).clamp(0,1).pow(2);
             const delta = this.uniforms.pointerDelta;
-            const stir = delta.mul(0.30).add(pUnit.mul(0.19)).add(vec3(pUnit.y.negate(),pUnit.x,0).mul(delta.length().mul(0.055)));
-            particleVelocity.addAssign(stir.mul(influence).mul(this.uniforms.pointerDrag));
+            const dragLength=segment.length().toConst('dragLength');
+            const dragUnit=segment.div(dragLength.max(0.001)).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
+            const tangent=vec3(pUnit.y.negate(),pUnit.x,0);
+            const dragAmount=dragLength.mul(0.36).clamp(0,1.35);
+            const dragKick=dragUnit.mul(1.2).add(pUnit.mul(0.82)).add(tangent.mul(0.20)).mul(influence).mul(dragAmount).mul(this.uniforms.pointerDrag).toConst('dragKick');
+            particleVelocity.addAssign(dragKick);
             particleVelocity.addAssign(pUnit.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt).mul(0.32));
             const clickOffset = particlePosition.sub(this.uniforms.clickCenter).mul(vec3(this.uniforms.screenScale,1,0));
             const clickDist = clickOffset.length().max(0.18);
             const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
-            const clickWeight = float(1).sub(clickDist.div(17.0)).clamp(0,1).pow(2);
-            particleVelocity.addAssign(clickDir.mul(clickWeight).mul(this.uniforms.clickImpulse));
+            const clickWeight = float(1).sub(clickDist.div(13.5).pow(2)).clamp(0,1).pow(2);
+            const clickKick=clickDir.mul(clickWeight).mul(this.uniforms.clickImpulse).toConst('clickKick');
+            particleVelocity.addAssign(clickKick.mul(1.55));
+            // Apply a bounded positional impulse as well as momentum. This makes
+            // the first rendered frame visibly respond even at a slow solver dt.
+            const directOffset=clickKick.mul(1.95).add(dragKick.mul(0.95)).toConst('directOffset');
             const np=nervePos(particlePosition).toConst('nerveCell');
             const incoming=neighbor(np,0,0,0).mul(0.65).max(neighbor(np,1,0,0)).max(neighbor(np,-1,0,0)).max(neighbor(np,0,1,0)).max(neighbor(np,0,-1,0)).max(neighbor(np,0,0,1)).max(neighbor(np,0,0,-1));
             const sourceR=particlePosition.sub(this.uniforms.nerveSource);
@@ -459,7 +467,7 @@ class mlsMpmSimulator {
             particleVelocity.mulAssign(float(1).min(float(5.2).div(particleVelocity.length().max(0.001))));
 
             this.particleBuffer.element(instanceIndex).get('C').assign(B.mul(4));
-            particlePosition.addAssign(particleVelocity.mul(this.uniforms.dt));
+            particlePosition.addAssign(particleVelocity.mul(this.uniforms.dt).add(directOffset));
             particlePosition.assign(clamp(particlePosition, vec3(2), this.uniforms.gridSize.sub(2)));
 
             const wallStiffness = 0.42;
@@ -477,7 +485,7 @@ class mlsMpmSimulator {
             this.particleBuffer.element(instanceIndex).get('velocity').assign(particleVelocity)
 
             const direction = this.particleBuffer.element(instanceIndex).get('direction');
-            direction.assign(mix(direction,particleVelocity, 0.1));
+            direction.assign(mix(direction,particleVelocity,float(0.1).add(this.uniforms.clickImpulse.mul(clickWeight).add(this.uniforms.pointerDrag.mul(influence)).clamp(0,1).mul(0.32))));
 
             // Soft-knee speed normalization preserves gradients even during fast impacts.
             const den = particleDensity.div(this.uniforms.restDensity).clamp(0,2.0);
