@@ -50,6 +50,8 @@ function light(name,color,intensity,pos,shadow=false){
 }
 const modes=['gather','unfold','divide','orbit','wall','rest','shear','braid','burst'];
 const policy=new AdaptivePolicy(modes,conf.learn), renderers=new Map();
+let requestedCount=conf.particles,countRevision=0,measuredFps=null;
+const countFormat=new Intl.NumberFormat('en-GB');
 const nerveSource=v(),rareCenter=v(),rareAxis=v(1,0,0);
 let nervePower=0,nextNerve=5,rareKind=0,rareStart=0,rareDuration=1,nextRare=rand(240,540),rareCount=0;
 const rareNames=['none','resonance','eclipse','fission'];
@@ -117,7 +119,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%');
+ document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps');
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.studio,la=1-Math.exp(-dt*4);
@@ -144,6 +146,10 @@ async function loop(now){
  raf=0;if(paused||dead||document.hidden)return;running=true;
  const dt=previous?Math.min((now-previous)/1000,.033):1/60;previous=now;age+=dt;
  try{
+  if(requestedCount!==conf.particles){
+   conf.particles=requestedCount;conf.updateParams();countRevision++;metrics=null;
+   policy.begin(state,null,age);nextSample=age+.5;
+  }
   direct(dt);await sim.update(dt,age);particles.update();await renderer.renderAsync(scene,camera);
   // Keep at most one rendered frame queued so input cannot sit behind a backlog of GPU frames.
   if(renderer.backend.device?.queue)await renderer.backend.device.queue.onSubmittedWorkDone();
@@ -151,10 +157,11 @@ async function loop(now){
   if(age>=nextSample&&!observing&&!senseError&&frame>3){
    nextSample=age+2.1;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
-   sim.observe().then(m=>{if(m){metrics=m;if(!rareKind&&!pointerDown)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
+   const revision=countRevision;
+   sim.observe().then(m=>{if(m&&revision===countRevision){metrics=m;if(!rareKind&&!pointerDown)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
   }
   perfFrames++;if(!perfStart)perfStart=now;
-  if(now-perfStart>4500){const fps=perfFrames*1000/(now-perfStart);if(fps<28&&ratio>.65){ratio=Math.max(.65,ratio-.15);resize();}perfFrames=0;perfStart=now;}
+  if(now-perfStart>4500){const fps=perfFrames*1000/(now-perfStart);measuredFps=fps;if(fps<28&&ratio>.65){ratio=Math.max(.65,ratio-.15);resize();}perfFrames=0;perfStart=now;}
  }catch(e){fail(e);stop();}finally{running=false;schedule();}
 }
 async function start(){
@@ -175,6 +182,10 @@ async function start(){
  sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim,conf.shape);renderers.set(conf.shape,particles);scene.add(particles.object);
  const shapeSelect=document.querySelector('#shape'),paletteSelect=document.querySelector('#palette'),colorSelect=document.querySelector('#color'),nerveToggle=document.querySelector('#nerves');
  shapeSelect.value=conf.shape;paletteSelect.value=String(conf.paletteMode);colorSelect.value=conf.densityOnly?'0':'1';nerveToggle.checked=conf.nerves;
+ const countSlider=document.querySelector('#particleCount'),countLabel=document.querySelector('#particleCountLabel');
+ countSlider.min='5000';countSlider.max=String(conf.maxParticles);countSlider.step='1000';countSlider.value=String(conf.particles);
+ countLabel.textContent=countFormat.format(conf.particles);
+ countSlider.oninput=()=>{requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
  shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value);particles.update();};
  paletteSelect.onchange=()=>{sim.uniforms.paletteMode.value=Number(paletteSelect.value);conf.paletteMode=Number(paletteSelect.value);};
  colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
@@ -200,7 +211,7 @@ async function start(){
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode});
+ window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode});
  schedule();
 }
 start().catch(fail);

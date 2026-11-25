@@ -114,9 +114,9 @@ class ParticleRenderer {
         this.shadowIndexCount = boxGeometry.index.count;
 
         const mergedGeometry = capsules
-            ? new THREE.CapsuleGeometry(0.23,1.42,2,conf.particles>=200000?6:8,1).rotateX(Math.PI/2)
+            ? new THREE.CapsuleGeometry(0.23,1.90,2,conf.maxParticles>=200000?6:8,1).rotateX(Math.PI/2)
             : spheres
-                ? new THREE.SphereGeometry(0.61,conf.particles>=200000?7:9,conf.particles>=200000?5:6)
+                ? new THREE.SphereGeometry(0.61,conf.maxParticles>=200000?7:9,conf.maxParticles>=200000?5:6)
                 : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
         if(shape!=='rods'){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
 
