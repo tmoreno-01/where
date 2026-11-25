@@ -108,7 +108,7 @@ function direct(dt){
  pointerDelta.copy(pointerGoal);
  const click=pendingClick;pendingClick=0;
  u.pointer.value.copy(pointer);u.pointerPrevious.value.copy(previousPointer);u.pointerDelta.value.copy(pointerDelta);
- u.pointerActive.value=pointerStrength;u.pointerDrag.value=dragDirty&&pointerDown?1:0;
+ u.pointerActive.value=pointerStrength;u.pointerDrag.value=dragDirty?1:0;
  u.clickImpulse.value=click;u.pointerPulse.value=Math.max(pointerPulse,click*2.6);u.clickCenter.value.copy(clickCenter);
  previousPointer.copy(pointer);pointerGoal.set(0,0,0);dragDirty=false;pointerPulse*=Math.exp(-dt*4.8);
  if(age>=nextNerve){nextNerve=age+rand(10,27);nerveSource.copy(metrics?.mean||v(.5,.5,.5)).add(v(rand(-.18,.18),rand(-.18,.18),rand(-.18,.18))).clampScalar(.08,.92).multiply(grid);nervePower=1;}
