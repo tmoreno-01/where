@@ -129,7 +129,7 @@ async function start(){
  sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim);scene.add(particles.object);
  resize();status.textContent='Initializing material field…';window.addEventListener('resize',resize);
  const canvas=renderer.domElement;
- function pointerPos(e){const rect=canvas.getBoundingClientRect();return v(clamp((e.clientX-rect.left)/rect.width,0,1)*(grid.x-4)+2,(1-clamp((e.clientY-rect.top)/rect.height,0,1))*(grid.y-4)+2,grid.z*.5);}
+ function pointerPos(e){const rect=canvas.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);const p=v();if(!raycaster.ray.intersectPlane(plane,p))return pointer.clone();const xScale=sim.uniforms.screenScale.value;return v(clamp(p.x*64/xScale+grid.x*.5,2,grid.x-2),clamp(p.y*64,2,grid.y-2),grid.z*.5);}
  canvas.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();pointerDown=true;pointer.copy(pointerPos(e));clickCenter.copy(pointer);pointerGoal.set(0,0,0);pointerDelta.set(0,0,0);pointerPulse=17;lastPointerTime=performance.now();canvas.setPointerCapture(e.pointerId);});
  canvas.addEventListener('pointermove',e=>{if(!pointerDown)return;e.preventDefault();const p=pointerPos(e),now=performance.now(),dt=Math.max(.008,Math.min(.12,(now-lastPointerTime)/1000));pointerGoal.copy(p).sub(pointer).multiplyScalar(.038/dt).clampLength(0,8.0);pointer.copy(p);lastPointerTime=now;});
  const release=()=>{pointerDown=false;pointerGoal.set(0,0,0);};
