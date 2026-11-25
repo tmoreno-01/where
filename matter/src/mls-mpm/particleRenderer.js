@@ -8,7 +8,7 @@ export const calcLookAtMatrix = /*#__PURE__*/ Fn( ( [ target_immutable ] ) => {
     const target = vec3( target_immutable ).toVar();
     const rr = vec3( 0.017,0.031,1.0 ).toVar();
     const ww = vec3( normalize( target.add( vec3(0.0001,0.0002,0.0003) ) ) ).toVar();
-    const uu = vec3( normalize( cross( ww, rr ) ).negate() ).toVar();
+    const uu = vec3( normalize( cross( ww, rr ).add(vec3(0.00001,0.00003,0.00002)) ).negate() ).toVar();
     const vv = vec3( normalize( cross( uu, ww ) ).negate() ).toVar();
 
     return mat3( uu, vv, ww );
@@ -120,12 +120,13 @@ class ParticleRenderer {
         this.geometry.instanceCount = this.mlsMpmSim.numParticles;
 
         this.material = new THREE.MeshStandardNodeMaterial({
-            metalness: 0.62,
-            roughness: 0.33,
+            metalness: 0.73,
+            roughness: 0.27,
             //iridescence: 1.0,
         });
 
         this.uniforms.size = uniform(1);
+        this.uniforms.chamberX = uniform(1);
         const vAo = varying(0, "vAo");
         const vNormal = varying(vec3(0), "v_normalView");
 
@@ -139,12 +140,17 @@ class ParticleRenderer {
             //return attribute("position").xyz.mul(0.1).add(positionAttribute.mul(vec3(1,1,0.4)));
             const mat = calcLookAtMatrix(particleDirection.xyz);
             vNormal.assign(transformNormalToView(mat.mul(normalLocal)));
-            vAo.assign(particlePosition.z.div(85));
+            vAo.assign(particlePosition.z.div(95));
             vAo.assign(vAo.mul(vAo).oneMinus());
-            return mat.mul(attribute("position").xyz.mul(this.uniforms.size)).mul(particleDensity.mul(0.4).add(0.5).clamp(0,1)).add(particlePosition.mul(vec3(1,1,0.65)));
+            const speed = particle.get('velocity').length().mul(0.28).clamp(0,1);
+            const local = attribute("position").xyz.mul(vec3(1,1,speed.mul(0.55).add(0.82)));
+            return mat.mul(local.mul(this.uniforms.size)).mul(particleDensity.mul(0.4).add(0.5).clamp(0.45,1)).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
         })();
         this.material.colorNode = particle.get("color");
         this.material.aoNode = vAo;
+        this.material.normalNode = normalize(vNormal);
+        this.material.roughnessNode = particle.get('density').mul(0.10).add(0.19).clamp(0.19,0.48);
+        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().mul(0.075).clamp(0.0,0.19));
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);
@@ -157,11 +163,13 @@ class ParticleRenderer {
         this.object.frustumCulled = false;
 
         const s = (1/64);
-        this.object.position.set(-32.0*s,0,0);
+        this.object.position.set(-conf.gridX*0.5*s,0,0);
         this.object.scale.set(s,s,s);
         this.object.castShadow = true;
         this.object.receiveShadow = true;
     }
+
+    setChamberScale(x){this.uniforms.chamberX.value=x;this.object.position.x=-conf.gridX*x/128;}
 
     update() {
         const { particles, bloom, actualSize } = conf;

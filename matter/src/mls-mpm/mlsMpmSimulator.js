@@ -42,7 +42,7 @@ class mlsMpmSimulator {
     }
     async init() {
         const {maxParticles} = conf;
-        this.gridSize.set(64,64,64);
+        this.gridSize.set(conf.gridX,conf.gridY,conf.gridZ);
 
         const particleStruct =  {
             position: { type: 'vec3' },
@@ -99,6 +99,11 @@ class mlsMpmSimulator {
         this.uniforms.axisB = uniform(new THREE.Vector3(0,0,-1));
         this.uniforms.drive = uniform(0.8);
         this.uniforms.palette = uniform(0.0);
+        this.uniforms.gather = uniform(0.0);
+        this.uniforms.drift = uniform(new THREE.Vector3());
+        this.uniforms.screenScale = uniform(1.0);
+        this.uniforms.sampleStride = uniform(1,'uint');
+        this.telemetry = instancedArray(1024,'vec4').label('telemetry');
 
         this.kernels.clearGrid = Fn(() => {
             this.cellBuffer.setAtomic("x", false);
@@ -276,6 +281,7 @@ class mlsMpmSimulator {
             const particleMass = this.particleBuffer.element(instanceIndex).get('mass').toConst("particleMass");
             const particleDensity = this.particleBuffer.element(instanceIndex).get('density').toConst("particleDensity");
             const particlePosition = this.particleBuffer.element(instanceIndex).get('position').xyz.toVar("particlePosition");
+            const prevVelocity = this.particleBuffer.element(instanceIndex).get('velocity').xyz.toConst("prevVelocity");
             const particleVelocity = vec3(0).toVar();
             If(this.uniforms.gravityType.equal(uint(2)), () => {
                 const pn = particlePosition.div(vec3(this.uniforms.gridSize.sub(1))).sub(0.5).normalize().toConst();
@@ -294,9 +300,9 @@ class mlsMpmSimulator {
             const wb = float(1).div(float(1).add(rb.dot(rb).div(280))).toConst();
             const spinA = cross(this.uniforms.axisA,ra).mul(0.048).sub(ra.mul(0.008)).mul(wa);
             const spinB = cross(this.uniforms.axisB,rb).mul(0.048).sub(rb.mul(0.008)).mul(wb);
-            const center = particlePosition.sub(vec3(32,32,32));
-            const restoring = center.mul(-0.0035);
-            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(restoring).mul(this.uniforms.dt));
+            const center = particlePosition.sub(vec3(this.uniforms.gridSize).mul(0.5));
+            const restoring = center.mul(this.uniforms.gather.mul(-0.016).sub(0.002));
+            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(restoring).add(this.uniforms.drift).mul(this.uniforms.dt));
 
             const cellIndex =  ivec3(particlePosition).sub(1).toConst("cellIndex");
             const cellDiff = particlePosition.fract().sub(0.5).toConst("cellDiff");
@@ -327,10 +333,13 @@ class mlsMpmSimulator {
                 });
             });
 
-            const dist = cross(this.uniforms.mouseRayDirection, particlePosition.mul(vec3(1,1,0.65)).sub(this.uniforms.mouseRayOrigin)).length()
+            const dist = cross(this.uniforms.mouseRayDirection, particlePosition.mul(vec3(this.uniforms.screenScale,1,0.65)).sub(this.uniforms.mouseRayOrigin)).length()
             const force = dist.mul(0.1).oneMinus().max(0.0).pow(2);
             //particleVelocity.assign(mix(particleVelocity, this.uniforms.mouseForce.mul(6), force));
             particleVelocity.addAssign(this.uniforms.mouseForce.mul(1).mul(force));
+            const edgeLow = vec3(7,7,5).sub(particlePosition).max(0);
+            const edgeHigh = particlePosition.sub(vec3(this.uniforms.gridSize).sub(vec3(7,7,5))).max(0);
+            particleVelocity.addAssign(edgeLow.sub(edgeHigh).mul(0.16).mul(this.uniforms.dt));
             particleVelocity.mulAssign(particleMass);
             particleVelocity.mulAssign(float(1).min(float(4.0).div(particleVelocity.length().max(0.001))));
 
@@ -338,7 +347,7 @@ class mlsMpmSimulator {
             particlePosition.addAssign(particleVelocity.mul(this.uniforms.dt));
             particlePosition.assign(clamp(particlePosition, vec3(2), this.uniforms.gridSize.sub(2)));
 
-            const wallStiffness = 0.3;
+            const wallStiffness = 0.42;
             const xN = particlePosition.add(particleVelocity.mul(this.uniforms.dt).mul(3.0)).toConst("xN");
             const wallMin = vec3(3).toConst("wallMin");
             const wallMax = vec3(this.uniforms.gridSize).sub(3).toConst("wallMax");
@@ -355,25 +364,60 @@ class mlsMpmSimulator {
             const direction = this.particleBuffer.element(instanceIndex).get('direction');
             direction.assign(mix(direction,particleVelocity, 0.1));
 
-            const den = particleDensity.div(this.uniforms.restDensity).clamp(0,2);
-            const vel = particleVelocity.length().mul(0.42).clamp(0,1);
-            const strat = particlePosition.x.mul(0.058).add(particlePosition.y.mul(0.037)).add(particlePosition.z.mul(0.046)).add(time.mul(0.033)).sin().mul(0.5).add(0.5);
-            const blend = den.mul(0.33).add(strat.mul(0.48)).add(vel.mul(0.19)).add(this.uniforms.palette.mul(0.12)).clamp(0,1);
-            const low = vec3(0.021,0.068,0.115);
-            const mid = vec3(0.025,0.35,0.47);
-            const high = vec3(0.85,0.29,0.075);
-            const pearl = vec3(0.86,0.78,0.61);
-            const cool = mix(low,mid,blend.mul(2.4).clamp(0,1));
-            const warm = mix(high,pearl,blend.sub(0.57).mul(2.5).clamp(0,1));
-            const color = mix(cool,warm,blend.sub(0.32).mul(3.4).clamp(0,1));
+            // Density is the primary pigment signal. Speed and strain modulate the response.
+            const den = particleDensity.div(this.uniforms.restDensity).clamp(0,2.0);
+            const vel = particleVelocity.length().mul(0.48).clamp(0,1);
+            const accel = particleVelocity.sub(prevVelocity).length().mul(2.4).clamp(0,1);
+            const directionTint = particleVelocity.x.div(particleVelocity.length().max(0.001)).mul(0.5).add(0.5);
+            const blend = den.mul(0.74).add(directionTint.sub(0.5).mul(0.11)).add(this.uniforms.palette.mul(0.06)).clamp(0,1);
+            const graphite = vec3(0.035,0.050,0.095);
+            const cobalt = vec3(0.075,0.22,0.64);
+            const petrol = vec3(0.045,0.48,0.52);
+            const copper = vec3(0.92,0.24,0.075);
+            const ivory = vec3(0.94,0.83,0.62);
+            const cool = mix(graphite,cobalt,blend.mul(3.3).clamp(0,1));
+            const middle = mix(cool,petrol,blend.sub(0.23).mul(3.9).clamp(0,1));
+            const hot = mix(copper,ivory,blend.sub(0.80).mul(5.0).clamp(0,1));
+            const pigment = mix(middle,hot,blend.sub(0.53).mul(3.3).clamp(0,1));
+            const energized = mix(pigment,vec3(0.78,0.89,1.0),accel.mul(0.16)).mul(vel.mul(0.32).add(0.78));
+            const oldColor = this.particleBuffer.element(instanceIndex).get('color');
+            const color = mix(oldColor,energized,0.12);
             this.particleBuffer.element(instanceIndex).get('color').assign(color);
         })().compute(1);
+        this.kernels.sample = Fn(() => {
+            const i = instanceIndex.mul(this.uniforms.sampleStride);
+            const p = this.particleBuffer.element(i);
+            this.telemetry.element(instanceIndex).assign(vec4(p.get('position'),p.get('density')));
+            this.telemetry.element(instanceIndex.add(uint(512))).assign(vec4(p.get('velocity'),1));
+        })().compute(512);
+    }
+
+    async observe() {
+        await this.renderer.computeAsync(this.kernels.sample);
+        const a = new Float32Array(await this.renderer.getArrayBufferAsync(this.telemetry.value));
+        const mean = new THREE.Vector3(), size = this.gridSize;
+        let density=0, speed=0, edge=0, spread=0, n=0;
+        for(let i=0;i<512;i++){
+            const j=i*4,k=(512+i)*4;
+            const x=a[j]/size.x,y=a[j+1]/size.y,z=a[j+2]/size.z;
+            if(!Number.isFinite(x+y+z+a[j+3]+a[k]+a[k+1]+a[k+2]))continue;
+            mean.x+=x;mean.y+=y;mean.z+=z;density+=a[j+3]/Math.max(conf.restDensity,0.001);
+            speed+=Math.hypot(a[k],a[k+1],a[k+2]);
+            edge+=Math.min(x,1-x,y,1-y)<0.115?1:0;n++;
+        }
+        if(n<480)return null;
+        mean.divideScalar(n);
+        for(let i=0;i<512;i++){
+            const j=i*4,x=a[j]/size.x,y=a[j+1]/size.y,z=a[j+2]/size.z;
+            if(Number.isFinite(x+y+z))spread+=(x-mean.x)**2+(y-mean.y)**2+(z-mean.z)**2;
+        }
+        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n)};
     }
 
     setMouseRay(origin, direction, pos) {
         origin.multiplyScalar(64);
         pos.multiplyScalar(64);
-        origin.add(new THREE.Vector3(32,0,0));
+        origin.add(new THREE.Vector3(this.gridSize.x*0.5*this.uniforms.screenScale.value,0,0));
         this.uniforms.mouseRayDirection.value.copy(direction.normalize());
         this.uniforms.mouseRayOrigin.value.copy(origin);
         this.mousePos.copy(pos);
@@ -398,6 +442,7 @@ class mlsMpmSimulator {
         if (particles !== this.numParticles) {
             this.numParticles = particles;
             this.uniforms.numParticles.value = particles;
+            this.uniforms.sampleStride.value = Math.max(1,Math.floor(particles/512));
             this.kernels.p2g1.count = particles;
             this.kernels.p2g1.updateDispatchCount();
             this.kernels.p2g2.count = particles;
@@ -414,6 +459,8 @@ class mlsMpmSimulator {
         if (this.mousePosArray.length > 3) { this.mousePosArray.shift(); }
         if (this.mousePosArray.length > 1) {
             this.uniforms.mouseForce.value.copy(this.mousePosArray[this.mousePosArray.length - 1]).sub(this.mousePosArray[0]).divideScalar(this.mousePosArray.length);
+            this.uniforms.mouseForce.value.x /= this.uniforms.screenScale.value;
+            this.uniforms.mouseForce.value.z /= 0.65;
         }
 
 
