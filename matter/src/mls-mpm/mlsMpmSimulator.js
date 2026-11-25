@@ -33,7 +33,8 @@ class mlsMpmSimulator {
     gridCellSize = new THREE.Vector3(0,0,0);
     uniforms = {};
     kernels = {};
-    fixedPointMultiplier = 1e6;
+    fixedPointMultiplier = 5e5;
+    tick=0;
     mousePos = new THREE.Vector3();
     mousePosArray = [];
 
@@ -69,6 +70,7 @@ class mlsMpmSimulator {
             const mass = 1.0 - Math.random() * 0.002;
             this.particleBuffer.set(i, "position", vec);
             this.particleBuffer.set(i, "mass", mass);
+            this.particleBuffer.set(i, "direction", [0,1,0]);
         }
 
         const cellCount = this.gridSize.x * this.gridSize.y * this.gridSize.z;
@@ -83,6 +85,7 @@ class mlsMpmSimulator {
         const nx=Math.ceil(conf.gridX/4),ny=Math.ceil(conf.gridY/4),nz=Math.ceil(conf.gridZ/4), nerveCount=nx*ny*nz;
         this.nerveGrid=new StructuredArray({sum:{type:'int',atomic:true},count:{type:'int',atomic:true}},nerveCount,'nerveGrid');
         this.nerveRead=instancedArray(nerveCount,'float').label('nerveRead');
+        this.nerveNearby=instancedArray(nerveCount,'float').label('nerveNearby');
 
         this.uniforms.gravityType = uniform(0, "uint");
         this.uniforms.gravity = uniform(new THREE.Vector3());
@@ -125,6 +128,7 @@ class mlsMpmSimulator {
         this.uniforms.pointerPulse = uniform(0.0);
         this.uniforms.memoryEnabled = uniform(conf.memory?1.0:0.0);
         this.uniforms.nervesEnabled = uniform(conf.nerves?1.0:0.0);
+        this.uniforms.fastPressure = uniform(conf.solver==='fast'?1.0:0.0);
         this.uniforms.nerveSource = uniform(new THREE.Vector3());
         this.uniforms.nerveStrength = uniform(0.0);
         this.uniforms.rareKind = uniform(0.0);
@@ -154,7 +158,7 @@ class mlsMpmSimulator {
             this.cellBuffer.element(instanceIndex).get('y').assign(0);
             this.cellBuffer.element(instanceIndex).get('z').assign(0);
             this.cellBuffer.element(instanceIndex).get('mass').assign(0);
-            this.cellBufferF.element(instanceIndex).assign(0);
+            // updateGrid writes every cell, including empty cells.
         })().compute(cellCount);
 
         const encodeFixedPoint = (f32) => {
@@ -195,6 +199,12 @@ class mlsMpmSimulator {
             If(instanceIndex.greaterThanEqual(uint(nerveCount)),()=>{Return();});
             const cell=this.nerveGrid.element(instanceIndex);
             this.nerveRead.element(instanceIndex).assign(float(cell.get('sum')).div(float(cell.get('count')).max(1).mul(1000)));
+        })().compute(nerveCount);
+        this.kernels.nerveSpread=Fn(()=>{
+            If(instanceIndex.greaterThanEqual(uint(nerveCount)),()=>{Return();});
+            const p=ivec3(int(instanceIndex).div(ny*nz),int(instanceIndex).div(nz).mod(ny),int(instanceIndex).mod(nz));
+            const n=neighbor(p,0,0,0).mul(0.65).max(neighbor(p,1,0,0)).max(neighbor(p,-1,0,0)).max(neighbor(p,0,1,0)).max(neighbor(p,0,-1,0)).max(neighbor(p,0,0,1)).max(neighbor(p,0,0,-1));
+            this.nerveNearby.element(instanceIndex).assign(n);
         })().compute(nerveCount);
         this.kernels.p2g1 = Fn(() => {
             this.cellBuffer.setAtomic("x", true);
@@ -308,7 +318,7 @@ class mlsMpmSimulator {
             const cell = this.cellBuffer.element(instanceIndex).toConst("cell");
 
             const mass = decodeFixedPoint(cell.get('mass')).toConst();
-            If(mass.lessThanEqual(0), () => { Return(); });
+            If(mass.lessThanEqual(0), () => { this.cellBufferF.element(instanceIndex).assign(vec4(0));Return(); });
 
             const vx = decodeFixedPoint(cell.get('x')).div(mass).toVar();
             const vy = decodeFixedPoint(cell.get('y')).div(mass).toVar();
@@ -317,6 +327,18 @@ class mlsMpmSimulator {
             const x = int(instanceIndex).div(this.uniforms.gridSize.z).div(this.uniforms.gridSize.y);
             const y = int(instanceIndex).div(this.uniforms.gridSize.z).mod(this.uniforms.gridSize.y);
             const z = int(instanceIndex).mod(this.uniforms.gridSize.z);
+            If(this.uniforms.fastPressure.greaterThan(0.5),()=>{
+                const p=ivec3(x,y,z),size=this.uniforms.gridSize.sub(ivec3(1));
+                const pressureAt=(dx,dy,dz)=>{
+                    const q=p.add(ivec3(dx,dy,dz)).max(ivec3(0)).min(size);
+                    const m=decodeFixedPoint(getCell(q).get('mass'));
+                    const d=m.div(this.uniforms.restDensity.max(0.001)).sub(1).max(0);
+                    return d.mul(d).mul(this.uniforms.stiffness).min(24);
+                };
+                const grad=vec3(pressureAt(1,0,0).sub(pressureAt(-1,0,0)),pressureAt(0,1,0).sub(pressureAt(0,-1,0)),pressureAt(0,0,1).sub(pressureAt(0,0,-1))).mul(0.5);
+                const acc=grad.mul(this.uniforms.dt).div(mass.max(0.25)).mul(0.85).clamp(-0.65,0.65);
+                vx.subAssign(acc.x);vy.subAssign(acc.y);vz.subAssign(acc.z);
+            });
 
 
             If(x.lessThan(int(2)).or(x.greaterThan(this.uniforms.gridSize.x.sub(int(2)))), () => {
@@ -337,7 +359,8 @@ class mlsMpmSimulator {
                 Return();
             });
             const particleMass = this.particleBuffer.element(instanceIndex).get('mass').toConst("particleMass");
-            const particleDensity = this.particleBuffer.element(instanceIndex).get('density').toConst("particleDensity");
+            const densitySlot=this.particleBuffer.element(instanceIndex).get('density');
+            const particleDensity = densitySlot.toVar("particleDensity");
             const particlePosition = this.particleBuffer.element(instanceIndex).get('position').xyz.toVar("particlePosition");
             const prevVelocity = this.particleBuffer.element(instanceIndex).get('velocity').xyz.toConst("prevVelocity");
             const memoryNode = this.particleBuffer.element(instanceIndex).get('memory');
@@ -390,6 +413,7 @@ class mlsMpmSimulator {
             const weights = array([w0,w1,w2]).toConst("weights");
 
             const B = mat3(0).toVar("B");
+            const sampledDensity=float(0).toVar('sampledDensity');
             Loop({ start: 0, end: 3, type: 'int', name: 'gx', condition: '<' }, ({gx}) => {
                 Loop({ start: 0, end: 3, type: 'int', name: 'gy', condition: '<' }, ({gy}) => {
                     Loop({ start: 0, end: 3, type: 'int', name: 'gz', condition: '<' }, ({gz}) => {
@@ -398,7 +422,9 @@ class mlsMpmSimulator {
                         const cellDist = vec3(cellX).add(0.5).sub(particlePosition).toConst("cellDist");
                         const cellPtr = getCellPtr(cellX);
 
-                        const weightedVelocity = this.cellBufferF.element(cellPtr).xyz.mul(weight).toConst("weightedVelocity");
+                        const gv=this.cellBufferF.element(cellPtr).toConst('gridSample');
+                        const weightedVelocity = gv.xyz.mul(weight).toConst("weightedVelocity");
+                        sampledDensity.addAssign(gv.w.mul(weight));
                         const term = mat3(
                             weightedVelocity.mul(cellDist.x),
                             weightedVelocity.mul(cellDist.y),
@@ -410,6 +436,10 @@ class mlsMpmSimulator {
                 });
             });
 
+            If(this.uniforms.fastPressure.greaterThan(0.5),()=>{
+                particleDensity.assign(mix(particleDensity,sampledDensity,0.09));
+                densitySlot.assign(particleDensity);
+            });
             const dist = cross(this.uniforms.mouseRayDirection, particlePosition.mul(vec3(this.uniforms.screenScale,1,0.65)).sub(this.uniforms.mouseRayOrigin)).length()
             const force = dist.mul(0.1).oneMinus().max(0.0).pow(2);
             //particleVelocity.assign(mix(particleVelocity, this.uniforms.mouseForce.mul(6), force));
@@ -440,7 +470,7 @@ class mlsMpmSimulator {
             // the first rendered frame visibly respond even at a slow solver dt.
             const directOffset=clickKick.mul(1.95).add(dragKick.mul(0.95)).toConst('directOffset');
             const np=nervePos(particlePosition).toConst('nerveCell');
-            const incoming=neighbor(np,0,0,0).mul(0.65).max(neighbor(np,1,0,0)).max(neighbor(np,-1,0,0)).max(neighbor(np,0,1,0)).max(neighbor(np,0,-1,0)).max(neighbor(np,0,0,1)).max(neighbor(np,0,0,-1));
+            const incoming=this.nerveNearby.element(nerveIndex(np)).toConst('incomingSignal');
             const sourceR=particlePosition.sub(this.uniforms.nerveSource);
             const source=float(1).sub(sourceR.length().div(10)).clamp(0,1).mul(this.uniforms.nerveStrength);
             const contactSignal=influence.mul(this.uniforms.pointerActive).mul(0.6).add(clickWeight.mul(this.uniforms.pointerPulse).mul(0.15));
@@ -458,9 +488,9 @@ class mlsMpmSimulator {
             const split=this.uniforms.rareAxis.mul(rareR.dot(this.uniforms.rareAxis).mul(0.16).clamp(-1,1)).mul(0.9);
             const rareForce=select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
-            const edgeLow = vec3(7,7,5).sub(particlePosition).max(0);
-            const edgeHigh = particlePosition.sub(vec3(this.uniforms.gridSize).sub(vec3(7,7,5))).max(0);
-            particleVelocity.addAssign(edgeLow.sub(edgeHigh).mul(0.16).mul(this.uniforms.dt));
+            const edgeLow = vec3(6,6,5).sub(particlePosition).max(0);
+            const edgeHigh = particlePosition.sub(vec3(this.uniforms.gridSize).sub(vec3(6,6,5))).max(0);
+            particleVelocity.addAssign(edgeLow.sub(edgeHigh).mul(0.12).mul(this.uniforms.dt));
             // Recent disturbance slightly changes local mobility; slowly relaxes back.
             particleVelocity.mulAssign(float(0.997).add(oldMemory.mul(0.002).mul(this.uniforms.memoryEnabled)));
             particleVelocity.mulAssign(particleMass);
@@ -470,22 +500,30 @@ class mlsMpmSimulator {
             particlePosition.addAssign(particleVelocity.mul(this.uniforms.dt).add(directOffset));
             particlePosition.assign(clamp(particlePosition, vec3(2), this.uniforms.gridSize.sub(2)));
 
-            const wallStiffness = 0.42;
-            const xN = particlePosition.add(particleVelocity.mul(this.uniforms.dt).mul(3.0)).toConst("xN");
-            const wallMin = vec3(3).toConst("wallMin");
-            const wallMax = vec3(this.uniforms.gridSize).sub(3).toConst("wallMax");
-            If(xN.x.lessThan(wallMin.x), () => { particleVelocity.x.addAssign(wallMin.x.sub(xN.x).mul(wallStiffness)); });
-            If(xN.x.greaterThan(wallMax.x), () => { particleVelocity.x.addAssign(wallMax.x.sub(xN.x).mul(wallStiffness)); });
-            If(xN.y.lessThan(wallMin.y), () => { particleVelocity.y.addAssign(wallMin.y.sub(xN.y).mul(wallStiffness)); });
-            If(xN.y.greaterThan(wallMax.y), () => { particleVelocity.y.addAssign(wallMax.y.sub(xN.y).mul(wallStiffness)); });
-            If(xN.z.lessThan(wallMin.z), () => { particleVelocity.z.addAssign(wallMin.z.sub(xN.z).mul(wallStiffness)); });
-            If(xN.z.greaterThan(wallMax.z), () => { particleVelocity.z.addAssign(wallMax.z.sub(xN.z).mul(wallStiffness)); });
+            // Dissipate only outward velocity on contact; do not repeatedly kick particles back into the wall.
+            const wallMin=vec3(2.015),wallMax=vec3(this.uniforms.gridSize).sub(2.015);
+            If(particlePosition.x.lessThan(wallMin.x),()=>{particleVelocity.x.assign(particleVelocity.x.max(0));});
+            If(particlePosition.x.greaterThan(wallMax.x),()=>{particleVelocity.x.assign(particleVelocity.x.min(0));});
+            If(particlePosition.y.lessThan(wallMin.y),()=>{particleVelocity.y.assign(particleVelocity.y.max(0));});
+            If(particlePosition.y.greaterThan(wallMax.y),()=>{particleVelocity.y.assign(particleVelocity.y.min(0));});
+            If(particlePosition.z.lessThan(wallMin.z),()=>{particleVelocity.z.assign(particleVelocity.z.max(0));});
+            If(particlePosition.z.greaterThan(wallMax.z),()=>{particleVelocity.z.assign(particleVelocity.z.min(0));});
 
             this.particleBuffer.element(instanceIndex).get('position').assign(particlePosition)
             this.particleBuffer.element(instanceIndex).get('velocity').assign(particleVelocity)
 
             const direction = this.particleBuffer.element(instanceIndex).get('direction');
-            direction.assign(mix(direction,particleVelocity,float(0.1).add(this.uniforms.clickImpulse.mul(clickWeight).add(this.uniforms.pointerDrag.mul(influence)).clamp(0,1).mul(0.32))));
+            // Capsules are unoriented axes: +v and -v are visually identical. Keep
+            // the existing hemisphere and freeze orientation when almost stationary.
+            const priorAxis=direction.toConst('priorAxis');
+            const mag=particleVelocity.length().toConst('axisSpeed');
+            If(mag.greaterThan(0.12),()=>{
+                const nextAxis=particleVelocity.div(mag.max(0.001));
+                const aligned=select(priorAxis.dot(nextAxis).lessThan(0),nextAxis.negate(),nextAxis);
+                const rate=mag.sub(0.12).div(0.8).clamp(0,1).mul(0.12).add(0.025);
+                const smoothed=mix(priorAxis,aligned,rate);
+                direction.assign(smoothed.div(smoothed.length().max(0.001)));
+            });
 
             // Soft-knee speed normalization preserves gradients even during fast impacts.
             const den = particleDensity.div(this.uniforms.restDensity).clamp(0,2.0);
@@ -577,6 +615,7 @@ class mlsMpmSimulator {
         const { particles, run, noise, dynamicViscosity, stiffness, restDensity, speed, gravity, gravitySensorReading, accelerometerReading } = conf;
 
         this.uniforms.noise.value = noise;
+        this.uniforms.fastPressure.value=conf.solver==='fast'?1:0;
         this.uniforms.stiffness.value = stiffness;
         this.uniforms.gravityType.value = gravity;
         if (gravity === 0) {
@@ -617,7 +656,11 @@ class mlsMpmSimulator {
 
 
         if (run) {
-            const kernels = [this.kernels.nerveClear,this.kernels.nerveDeposit,this.kernels.nerveResolve,this.kernels.clearGrid, this.kernels.p2g1, this.kernels.p2g2, this.kernels.updateGrid, this.kernels.g2p];
+            const kernels=[];
+            if(conf.nerves && this.tick%2===0)kernels.push(this.kernels.nerveClear,this.kernels.nerveDeposit,this.kernels.nerveResolve,this.kernels.nerveSpread);
+            kernels.push(this.kernels.clearGrid,this.kernels.p2g1);
+            if(conf.solver==='classic')kernels.push(this.kernels.p2g2);
+            kernels.push(this.kernels.updateGrid,this.kernels.g2p);this.tick++;
             await this.renderer.computeAsync(kernels);
         }
     }

@@ -6,10 +6,13 @@ import {conf} from "../conf.js";
 
 export const calcLookAtMatrix = /*#__PURE__*/ Fn( ( [ target_immutable ] ) => {
     const target = vec3( target_immutable ).toVar();
-    const rr = vec3( 0.017,0.031,1.0 ).toVar();
-    const ww = vec3( normalize( target.add( vec3(0.0001,0.0002,0.0003) ) ) ).toVar();
-    const uu = vec3( normalize( cross( ww, rr ).add(vec3(0.00001,0.00003,0.00002)) ).negate() ).toVar();
-    const vv = vec3( normalize( cross( uu, ww ) ).negate() ).toVar();
+    const ww = normalize(target.add(vec3(0.000001,0.000001,0.000001))).toVar();
+    // Closed-form stable orthonormal basis (no nearly parallel cross-product).
+    const signZ=ww.z.greaterThanEqual(0).select(float(1),float(-1));
+    const a=float(-1).div(signZ.add(ww.z));
+    const b=ww.x.mul(ww.y).mul(a);
+    const uu=vec3(float(1).add(signZ.mul(ww.x.mul(ww.x)).mul(a)),signZ.mul(b),signZ.mul(ww.x).negate());
+    const vv=vec3(b,signZ.add(ww.y.mul(ww.y).mul(a)),ww.y.negate());
 
     return mat3( uu, vv, ww );
 } ).setLayout( {

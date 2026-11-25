@@ -51,6 +51,7 @@ function light(name,color,intensity,pos,shadow=false){
 const modes=['gather','unfold','divide','orbit','wall','rest','shear','braid','burst'];
 const policy=new AdaptivePolicy(modes,conf.learn), renderers=new Map();
 let requestedCount=conf.particles,countRevision=0,measuredFps=null;
+let shadowMode=params.get('shadows')||'auto',shadowActive=false,renderCeiling=1,nextDiagnostic=0,slowWindows=0,fastWindows=0;
 const countFormat=new Intl.NumberFormat('en-GB');
 const nerveSource=v(),rareCenter=v(),rareAxis=v(1,0,0);
 let nervePower=0,nextNerve=5,rareKind=0,rareStart=0,rareDuration=1,nextRare=rand(240,540),rareCount=0;
@@ -119,7 +120,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps');
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.studio,la=1-Math.exp(-dt*4);
@@ -130,6 +131,7 @@ function direct(dt){
  scene.environmentIntensity+=(look.env-scene.environmentIntensity)*la;
  exposure+=(look.exposure-activity*.035-exposure)*(1-Math.exp(-dt*3));renderer.toneMappingExposure=exposure;
 }
+function setShadows(enabled){if(shadowActive===enabled&&renderer.shadowMap.enabled===enabled)return;shadowActive=enabled;renderer.shadowMap.enabled=enabled;lightRig.key.castShadow=enabled;}
 function resize(){
  if(!renderer||!camera)return;
  const aspect=innerWidth/Math.max(1,innerHeight),hh=61.8/128;
@@ -140,7 +142,7 @@ function resize(){
  renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
 }
 function fail(e){console.error(e);dead=true;status.hidden=false;status.textContent='This experiment requires a working WebGPU browser and graphics adapter. '+(e?.message||String(e));}
-function stop(){if(raf)cancelAnimationFrame(raf);raf=0;previous=0;}
+function stop(){if(raf)cancelAnimationFrame(raf);raf=0;previous=0;perfStart=0;perfFrames=0;}
 function schedule(){if(!raf&&!running&&!paused&&!dead&&!document.hidden)raf=requestAnimationFrame(loop);}
 async function loop(now){
  raf=0;if(paused||dead||document.hidden)return;running=true;
@@ -149,25 +151,32 @@ async function loop(now){
   if(requestedCount!==conf.particles){
    conf.particles=requestedCount;conf.updateParams();countRevision++;metrics=null;
    policy.begin(state,null,age);nextSample=age+.5;
+   if(shadowMode==='auto'&&conf.particles>=200000)setShadows(false);
   }
   direct(dt);await sim.update(dt,age);particles.update();await renderer.renderAsync(scene,camera);
   // Keep at most one rendered frame queued so input cannot sit behind a backlog of GPU frames.
   if(renderer.backend.device?.queue)await renderer.backend.device.queue.onSubmittedWorkDone();
   if(frame++===0){status.hidden=true;stage.classList.add('ready');}
   if(age>=nextSample&&!observing&&!senseError&&frame>3){
-   nextSample=age+2.1;observing=true;
+   nextSample=age+3.5;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
    const revision=countRevision;
    sim.observe().then(m=>{if(m&&revision===countRevision){metrics=m;if(!rareKind&&!pointerDown)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
   }
   perfFrames++;if(!perfStart)perfStart=now;
-  if(now-perfStart>4500){const fps=perfFrames*1000/(now-perfStart);measuredFps=fps;if(fps<28&&ratio>.65){ratio=Math.max(.65,ratio-.15);resize();}perfFrames=0;perfStart=now;}
+  if(now-perfStart>2200){
+   const fps=perfFrames*1000/(now-perfStart);measuredFps=fps;
+   if(fps<42){slowWindows++;fastWindows=0;}else if(fps>56){fastWindows++;slowWindows=0;}else{slowWindows=0;fastWindows=0;}
+   if(slowWindows>=2){if(shadowMode==='auto'&&shadowActive)setShadows(false);else if(ratio>.60){ratio=Math.max(.60,ratio-.10);resize();}slowWindows=0;}
+   if(fastWindows>=5&&ratio<renderCeiling){ratio=Math.min(renderCeiling,ratio+.05);resize();fastWindows=0;}
+   perfFrames=0;perfStart=now;
+  }
  }catch(e){fail(e);stop();}finally{running=false;schedule();}
 }
 async function start(){
  if(!navigator.gpu)throw Error('WebGPU is unavailable.');
  renderer=new THREE.WebGPURenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
- ratio=Math.min(devicePixelRatio||1,conf.quality==='mobile'?.85:conf.particles>=200000?1.0:1.25);
+ ratio=Math.min(devicePixelRatio||1,conf.quality==='mobile'?.85:conf.particles>=200000?1.0:1.25);renderCeiling=ratio;
  renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ReinhardToneMapping;renderer.toneMappingExposure=.82;
  await renderer.init();if(!renderer.backend.isWebGPUBackend)throw Error('Unable to initialize the WebGPU backend.');
  renderer.shadowMap.enabled=conf.quality!=='mobile';renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.appendChild(renderer.domElement);
@@ -175,6 +184,7 @@ async function start(){
  camera=new THREE.OrthographicCamera(-1,1,.5,-.5,.015,10);camera.position.set(0,.5,-2.2);camera.lookAt(target);
  scene.add(new THREE.HemisphereLight(0xd6e2ff,0x292035,.30));
  light('key',0xfff4ec,1.65,v(-.85,1.65,-.95),conf.quality!=='mobile');
+ setShadows(shadowMode==='on'||(shadowMode==='auto'&&!conf.mobile&&conf.particles<200000));
  light('fill',0xa9c9ff,.60,v(-1.1,.35,-.7));light('rim',0xe7f1ff,1.85,v(.95,.88,.95));light('warm',0xffad73,.46,v(.15,-.6,.25));
  const backdrop=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,map:backdropTexture(),roughness:.96,metalness:0}));
  backdrop.name='studio backdrop';
@@ -182,6 +192,9 @@ async function start(){
  sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim,conf.shape);renderers.set(conf.shape,particles);scene.add(particles.object);
  const shapeSelect=document.querySelector('#shape'),paletteSelect=document.querySelector('#palette'),colorSelect=document.querySelector('#color'),nerveToggle=document.querySelector('#nerves');
  shapeSelect.value=conf.shape;paletteSelect.value=String(conf.paletteMode);colorSelect.value=conf.densityOnly?'0':'1';nerveToggle.checked=conf.nerves;
+ const solverSelect=document.querySelector('#solver'),shadowSelect=document.querySelector('#shadows');
+ solverSelect.value=conf.solver;solverSelect.onchange=()=>{conf.solver=solverSelect.value;};
+ shadowSelect.value=shadowMode;shadowSelect.onchange=()=>{shadowMode=shadowSelect.value;setShadows(shadowMode==='on'||(shadowMode==='auto'&&!conf.mobile&&conf.particles<200000));};
  const countSlider=document.querySelector('#particleCount'),countLabel=document.querySelector('#particleCountLabel');
  countSlider.min='5000';countSlider.max=String(conf.maxParticles);countSlider.step='1000';countSlider.value=String(conf.particles);
  countLabel.textContent=countFormat.format(conf.particles);
@@ -211,7 +224,7 @@ async function start(){
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode});
+ window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode});
  schedule();
 }
 start().catch(fail);
