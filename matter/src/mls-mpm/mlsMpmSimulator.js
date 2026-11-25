@@ -53,6 +53,8 @@ class mlsMpmSimulator {
             direction: { type: 'vec3' },
             color: { type: 'vec3' },
             memory: { type: 'float' },
+            signal: { type: 'float' },
+            refractory: { type: 'float' },
         };
         this.particleBuffer = new StructuredArray(particleStruct, maxParticles, "particleData");
 
@@ -78,6 +80,9 @@ class mlsMpmSimulator {
         };
         this.cellBuffer = new StructuredArray(cellStruct, cellCount, "cellData");
         this.cellBufferF = instancedArray(cellCount, 'vec4').label('cellDataF');
+        const nx=Math.ceil(conf.gridX/4),ny=Math.ceil(conf.gridY/4),nz=Math.ceil(conf.gridZ/4), nerveCount=nx*ny*nz;
+        this.nerveGrid=new StructuredArray({sum:{type:'int',atomic:true},count:{type:'int',atomic:true}},nerveCount,'nerveGrid');
+        this.nerveRead=instancedArray(nerveCount,'float').label('nerveRead');
 
         this.uniforms.gravityType = uniform(0, "uint");
         this.uniforms.gravity = uniform(new THREE.Vector3());
@@ -116,6 +121,13 @@ class mlsMpmSimulator {
         this.uniforms.pointerActive = uniform(0.0);
         this.uniforms.pointerPulse = uniform(0.0);
         this.uniforms.memoryEnabled = uniform(conf.memory?1.0:0.0);
+        this.uniforms.nervesEnabled = uniform(conf.nerves?1.0:0.0);
+        this.uniforms.nerveSource = uniform(new THREE.Vector3());
+        this.uniforms.nerveStrength = uniform(0.0);
+        this.uniforms.rareKind = uniform(0.0);
+        this.uniforms.rareStrength = uniform(0.0);
+        this.uniforms.rareCenter = uniform(new THREE.Vector3());
+        this.uniforms.rareAxis = uniform(new THREE.Vector3(1,0,0));
         this.uniforms.tideAxis = uniform(new THREE.Vector3(1,0,0));
         this.uniforms.tidePhase = uniform(0.0);
         this.uniforms.tideAmount = uniform(0.0);
@@ -158,6 +170,29 @@ class mlsMpmSimulator {
             return this.cellBuffer.element(getCellPtr(ipos));
         };
 
+        const nervePos = p => ivec3(p.div(4)).max(ivec3(0)).min(ivec3(nx-1,ny-1,nz-1));
+        const nerveIndex = p => uint(p.x.mul(ny*nz).add(p.y.mul(nz)).add(p.z));
+        const neighbor = (p,dx,dy,dz) => this.nerveRead.element(nerveIndex(p.add(ivec3(dx,dy,dz)).max(ivec3(0)).min(ivec3(nx-1,ny-1,nz-1))));
+        this.kernels.nerveClear = Fn(() => {
+            this.nerveGrid.setAtomic('sum',false);this.nerveGrid.setAtomic('count',false);
+            If(instanceIndex.greaterThanEqual(uint(nerveCount)),()=>{Return();});
+            this.nerveGrid.element(instanceIndex).get('sum').assign(0);
+            this.nerveGrid.element(instanceIndex).get('count').assign(0);
+        })().compute(nerveCount);
+        this.kernels.nerveDeposit = Fn(() => {
+            this.nerveGrid.setAtomic('sum',true);this.nerveGrid.setAtomic('count',true);
+            If(instanceIndex.greaterThanEqual(this.uniforms.numParticles),()=>{Return();});
+            const p=this.particleBuffer.element(instanceIndex);
+            const cell=this.nerveGrid.element(nerveIndex(nervePos(p.get('position'))));
+            atomicAdd(cell.get('sum'),int(p.get('signal').clamp(0,1).mul(1000)));
+            atomicAdd(cell.get('count'),int(1));
+        })().compute(1);
+        this.kernels.nerveResolve = Fn(() => {
+            this.nerveGrid.setAtomic('sum',false);this.nerveGrid.setAtomic('count',false);
+            If(instanceIndex.greaterThanEqual(uint(nerveCount)),()=>{Return();});
+            const cell=this.nerveGrid.element(instanceIndex);
+            this.nerveRead.element(instanceIndex).assign(float(cell.get('sum')).div(float(cell.get('count')).max(1).mul(1000)));
+        })().compute(nerveCount);
         this.kernels.p2g1 = Fn(() => {
             this.cellBuffer.setAtomic("x", true);
             this.cellBuffer.setAtomic("y", true);
@@ -304,6 +339,10 @@ class mlsMpmSimulator {
             const prevVelocity = this.particleBuffer.element(instanceIndex).get('velocity').xyz.toConst("prevVelocity");
             const memoryNode = this.particleBuffer.element(instanceIndex).get('memory');
             const oldMemory = memoryNode.toConst("oldMemory");
+            const nerve = this.particleBuffer.element(instanceIndex).get('signal');
+            const refractory = this.particleBuffer.element(instanceIndex).get('refractory');
+            const oldSignal=nerve.toConst('oldSignal');
+            const oldRecovery=refractory.toConst('oldRecovery');
             const particleVelocity = vec3(0).toVar();
             If(this.uniforms.gravityType.equal(uint(2)), () => {
                 const pn = particlePosition.div(vec3(this.uniforms.gridSize.sub(1))).sub(0.5).normalize().toConst();
@@ -384,6 +423,25 @@ class mlsMpmSimulator {
             const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
             const clickWeight = float(1).sub(clickDist.div(17.0)).clamp(0,1).pow(2);
             particleVelocity.addAssign(clickDir.mul(clickWeight).mul(this.uniforms.pointerPulse).mul(this.uniforms.dt));
+            const np=nervePos(particlePosition).toConst('nerveCell');
+            const incoming=neighbor(np,0,0,0).mul(0.65).max(neighbor(np,1,0,0)).max(neighbor(np,-1,0,0)).max(neighbor(np,0,1,0)).max(neighbor(np,0,-1,0)).max(neighbor(np,0,0,1)).max(neighbor(np,0,0,-1));
+            const sourceR=particlePosition.sub(this.uniforms.nerveSource);
+            const source=float(1).sub(sourceR.length().div(10)).clamp(0,1).mul(this.uniforms.nerveStrength);
+            const contactSignal=influence.mul(this.uniforms.pointerActive).mul(0.6).add(clickWeight.mul(this.uniforms.pointerPulse).mul(0.15));
+            const rareR=particlePosition.sub(this.uniforms.rareCenter);
+            const rareDir=rareR.div(rareR.length().max(2));
+            const rareWeight=float(1).div(float(1).add(rareR.dot(rareR).div(560)));
+            const kind=this.uniforms.rareKind, rare=this.uniforms.rareStrength;
+            const resonance=select(kind.equal(1),rare.mul(rareWeight),float(0));
+            const trigger=incoming.sub(0.14).mul(6.0).clamp(0,1).max(source).max(contactSignal).max(resonance).clamp(0,1).mul(float(1).sub(oldRecovery.mul(1.8)).clamp(0,1));
+            const signal=oldSignal.add(trigger.mul(3.4).mul(float(1).sub(oldSignal)).sub(oldSignal.mul(0.83)).mul(this.uniforms.dt)).clamp(0,1).mul(this.uniforms.nervesEnabled);
+            const recovery=oldRecovery.add(oldSignal.mul(0.65).sub(oldRecovery.mul(0.12)).mul(this.uniforms.dt)).clamp(0,1).mul(this.uniforms.nervesEnabled);
+            nerve.assign(signal);refractory.assign(recovery);
+            const twitch=cross(this.uniforms.axisC,sourceR.div(sourceR.length().max(2))).mul(signal.sub(oldSignal).max(0).mul(1.8));
+            const lens=rareDir.mul(-0.95).mul(rareWeight);
+            const split=this.uniforms.rareAxis.mul(rareR.dot(this.uniforms.rareAxis).mul(0.16).clamp(-1,1)).mul(0.9);
+            const rareForce=select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))).mul(rare);
+            particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
             const edgeLow = vec3(7,7,5).sub(particlePosition).max(0);
             const edgeHigh = particlePosition.sub(vec3(this.uniforms.gridSize).sub(vec3(7,7,5))).max(0);
             particleVelocity.addAssign(edgeLow.sub(edgeHigh).mul(0.16).mul(this.uniforms.dt));
@@ -448,7 +506,10 @@ class mlsMpmSimulator {
             const pigment = mix(mix(spectrum,acidC,select(this.uniforms.paletteMode.equal(1),float(1),float(0))),emberC,select(this.uniforms.paletteMode.equal(2),float(1),float(0)));
             const afterimage = mix(vec3(0.19,0.035,0.52),vec3(0.72,0.10,0.20),memory);
             const remembered = mix(pigment,afterimage,memory.mul(0.72).mul(this.uniforms.colorMix));
-            const illuminated = remembered.mul(speed.mul(0.28).add(0.80)).mul(accel.mul(0.13).add(0.94));
+            const nerveColor=mix(vec3(0.20,0.035,0.76),vec3(0.78,0.30,0.025),signal);
+            const activated=mix(remembered,nerveColor,signal.mul(0.72));
+            const eclipseTint=mix(activated,vec3(0.12,0.035,0.28),select(kind.equal(2),rare.mul(0.48),float(0)));
+            const illuminated = eclipseTint.mul(speed.mul(0.28).add(0.80)).mul(accel.mul(0.13).add(0.94));
             const oldColor = this.particleBuffer.element(instanceIndex).get('color');
             const color = mix(oldColor,illuminated,0.16);
             this.particleBuffer.element(instanceIndex).get('color').assign(color);
@@ -457,7 +518,7 @@ class mlsMpmSimulator {
             const i = instanceIndex.mul(this.uniforms.sampleStride);
             const p = this.particleBuffer.element(i);
             this.telemetry.element(instanceIndex).assign(vec4(p.get('position'),p.get('density')));
-            this.telemetry.element(instanceIndex.add(uint(512))).assign(vec4(p.get('velocity'),1));
+            this.telemetry.element(instanceIndex.add(uint(512))).assign(vec4(p.get('velocity'),p.get('signal')));
         })().compute(512);
     }
 
@@ -465,13 +526,15 @@ class mlsMpmSimulator {
         await this.renderer.computeAsync(this.kernels.sample);
         const a = new Float32Array(await this.renderer.getArrayBufferAsync(this.telemetry.value));
         const mean = new THREE.Vector3(), size = this.gridSize;
-        let density=0, speed=0, edge=0, spread=0, n=0;
+        let density=0, density2=0, speed=0, speed2=0, edge=0, spread=0, signal=0, n=0; const hist=new Array(64).fill(0);
         for(let i=0;i<512;i++){
             const j=i*4,k=(512+i)*4;
             const x=a[j]/size.x,y=a[j+1]/size.y,z=a[j+2]/size.z;
             if(!Number.isFinite(x+y+z+a[j+3]+a[k]+a[k+1]+a[k+2]))continue;
-            mean.x+=x;mean.y+=y;mean.z+=z;density+=a[j+3]/Math.max(conf.restDensity,0.001);
-            speed+=Math.hypot(a[k],a[k+1],a[k+2]);
+            mean.x+=x;mean.y+=y;mean.z+=z;
+            const d=a[j+3]/Math.max(conf.restDensity,0.001),s=Math.hypot(a[k],a[k+1],a[k+2]);
+            density+=d;density2+=d*d;speed+=s;speed2+=s*s;signal+=a[k+3];
+            const bx=Math.min(7,Math.max(0,Math.floor(x*8))),by=Math.min(7,Math.max(0,Math.floor(y*8)));hist[by*8+bx]++;
             edge+=Math.min(x,1-x,y,1-y)<0.115?1:0;n++;
         }
         if(n<480)return null;
@@ -480,7 +543,9 @@ class mlsMpmSimulator {
             const j=i*4,x=a[j]/size.x,y=a[j+1]/size.y,z=a[j+2]/size.z;
             if(Number.isFinite(x+y+z))spread+=(x-mean.x)**2+(y-mean.y)**2+(z-mean.z)**2;
         }
-        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n)};
+        const distribution=hist.map(x=>x/n);
+        const entropy=-distribution.reduce((sum,p)=>sum+(p>0?p*Math.log(p):0),0)/Math.log(64);
+        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution};
     }
 
     setMouseRay(origin, direction, pos) {
@@ -512,6 +577,8 @@ class mlsMpmSimulator {
             this.numParticles = particles;
             this.uniforms.numParticles.value = particles;
             this.uniforms.sampleStride.value = Math.max(1,Math.floor(particles/512));
+            this.kernels.nerveDeposit.count = particles;
+            this.kernels.nerveDeposit.updateDispatchCount();
             this.kernels.p2g1.count = particles;
             this.kernels.p2g1.updateDispatchCount();
             this.kernels.p2g2.count = particles;
@@ -534,7 +601,7 @@ class mlsMpmSimulator {
 
 
         if (run) {
-            const kernels = [this.kernels.clearGrid, this.kernels.p2g1, this.kernels.p2g2, this.kernels.updateGrid, this.kernels.g2p];
+            const kernels = [this.kernels.nerveClear,this.kernels.nerveDeposit,this.kernels.nerveResolve,this.kernels.clearGrid, this.kernels.p2g1, this.kernels.p2g2, this.kernels.updateGrid, this.kernels.g2p];
             await this.renderer.computeAsync(kernels);
         }
     }

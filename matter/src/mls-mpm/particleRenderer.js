@@ -95,7 +95,8 @@ class ParticleRenderer {
     bloom = false;
     uniforms = {};
 
-    constructor(mlsMpmSim) {
+    constructor(mlsMpmSim,shape=conf.shape) {
+        const spheres=shape==='spheres',capsules=shape==='capsules';
         this.mlsMpmSim = mlsMpmSim;
 
         /*const box = new THREE.BoxGeometry(0.7, 0.7,3);
@@ -112,12 +113,12 @@ class ParticleRenderer {
         this.defaultIndexCount = roundedBoxGeometry.index.count;
         this.shadowIndexCount = boxGeometry.index.count;
 
-        const mergedGeometry = conf.capsules
-            ? new THREE.CapsuleGeometry(0.38,0.85,2,conf.particles>=200000?6:8,1).rotateX(Math.PI/2)
-            : conf.spheres
+        const mergedGeometry = capsules
+            ? new THREE.CapsuleGeometry(0.23,1.42,2,conf.particles>=200000?6:8,1).rotateX(Math.PI/2)
+            : spheres
                 ? new THREE.SphereGeometry(0.61,conf.particles>=200000?7:9,conf.particles>=200000?5:6)
                 : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
-        if(conf.shape!=='rods'){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
+        if(shape!=='rods'){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
 
         this.geometry = new THREE.InstancedBufferGeometry().copy(mergedGeometry);
 
@@ -143,28 +144,28 @@ class ParticleRenderer {
 
             //return attribute("position").xyz.mul(10).add(vec3(32,32,0));
             //return attribute("position").xyz.mul(0.1).add(positionAttribute.mul(vec3(1,1,0.4)));
-            const mat = conf.spheres ? null : calcLookAtMatrix(particleDirection.xyz);
-            if(!conf.spheres)vNormal.assign(transformNormalToView(mat.mul(normalLocal)));
+            const mat = spheres ? null : calcLookAtMatrix(particleDirection.xyz);
+            if(!spheres)vNormal.assign(transformNormalToView(mat.mul(normalLocal)));
             vAo.assign(particlePosition.z.div(95));
             vAo.assign(vAo.mul(vAo).oneMinus());
             const speed = particle.get('velocity').length().mul(0.28).clamp(0,1);
             const local = attribute("position").xyz;
             const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).clamp(0.72,1.12);
-            if(conf.spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
-            if(conf.capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
+            if(spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
+            if(capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
             return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
         })();
         this.material.colorNode = particle.get("color");
         this.material.aoNode = vAo;
-        if(!conf.spheres)this.material.normalNode = normalize(vNormal);
+        if(!spheres)this.material.normalNode = normalize(vNormal);
         this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.075).add(0.34).sub(particle.get('memory').mul(0.12)).clamp(0.23,0.52);
-        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.055).clamp(0.0,0.085));
+        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.055).clamp(0.0,0.085).add(particle.get('signal').mul(0.19)));
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);
 
         this.object = new THREE.Mesh(this.geometry, this.material);
-        this.object.onBeforeShadow = () => { if(conf.shape==='rods')this.geometry.setDrawRange(this.defaultIndexCount, Infinity); }
+        this.object.onBeforeShadow = () => { if(shape==='rods')this.geometry.setDrawRange(this.defaultIndexCount, Infinity); }
         this.object.onAfterShadow = () => { this.geometry.setDrawRange(0, this.defaultIndexCount); }
 
 

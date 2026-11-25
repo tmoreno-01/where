@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import Simulator from './mls-mpm/mlsMpmSimulator.js';
 import ParticleRenderer from './mls-mpm/particleRenderer.js';
 import {conf} from './conf.js';
+import {AdaptivePolicy} from './policy.js';
 const stage=document.querySelector('#stage'),status=document.querySelector('#status'),params=new URLSearchParams(location.search);
 const v=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z),rand=(a,b)=>a+(b-a)*Math.random(),clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
 const target=v(0,.5,.24),raycaster=new THREE.Raycaster(),plane=new THREE.Plane(v(0,0,-1),.24);
@@ -37,13 +38,22 @@ function light(name,color,intensity,pos,shadow=false){
  return l;
 }
 const modes=['gather','unfold','divide','orbit','wall','rest','shear','braid','burst'];
+const policy=new AdaptivePolicy(modes,conf.learn), renderers=new Map();
+const nerveSource=v(),rareCenter=v(),rareAxis=v(1,0,0);
+let nervePower=0,nextNerve=5,rareKind=0,rareStart=0,rareDuration=1,nextRare=rand(240,540),rareCount=0;
+const rareNames=['none','resonance','eclipse','fission'];
+function rareEvent(kind){
+ rareKind=kind||1+Math.floor(Math.random()*3);rareStart=age;rareDuration=rand(14,23);rareCount++;
+ rareCenter.copy(metrics?.mean||v(.5,.5,.5)).multiply(grid);
+ rareAxis.set(rand(-1,1),rand(-1,1),rand(-.5,.5)).normalize();nextRare=age+rand(300,720);
+}
 function choose(){
- const m=metrics;
+ policy.finish();const m=metrics;
  const scores={gather:1,unfold:1,divide:1,orbit:1,wall:1,rest:0.45,shear:1.3,braid:1.4,burst:0.95};
  if(m){scores.gather+=clamp((m.spread-.26)*12,0,4);scores.unfold+=clamp((m.density-0.8)*3.5,0,4)+clamp((.22-m.spread)*14,0,3);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.wall+=m.edge<.12?1.4:-.8;scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);}
- for(const k of modes){scores[k]+=rand(0,.95);if(recent.includes(k))scores[k]-=1.5;if(k===state)scores[k]-=3;}
+ for(const k of modes){scores[k]+=rand(0,.65)+policy.bonus(k,m);if(recent.includes(k))scores[k]-=1.5;if(k===state)scores[k]-=3;}
  const choice=forced&&modes.includes(forced)?forced:modes.reduce((a,b)=>scores[a]>scores[b]?a:b);
- recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);
+ recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);policy.begin(choice,m,age);
  const set=(i,x,y,z)=>goals[i].set(x,y,z).multiply(grid);
  const axis=(i,x,y,z)=>axisGoals[i].set(x,y,z).normalize();
  driftGoal.set(0,0,0);gatherGoal=0;paletteGoal=rand(-.65,.65);lightGoal=rand(-.75,.75);
@@ -86,6 +96,13 @@ function direct(dt){
  pointerStrength+=((pointerDown?1:0)-pointerStrength)*(1-Math.exp(-dt*9));
  pointerPulse*=Math.exp(-dt*3.2);
  u.pointer.value.copy(pointer);u.pointerDelta.value.copy(pointerDelta);u.pointerActive.value=pointerStrength;u.pointerPulse.value=pointerPulse;u.clickCenter.value.copy(clickCenter);
+ if(age>=nextNerve){nextNerve=age+rand(10,27);nerveSource.copy(metrics?.mean||v(.5,.5,.5)).add(v(rand(-.18,.18),rand(-.18,.18),rand(-.18,.18))).clampScalar(.08,.92).multiply(grid);nervePower=1;}
+ nervePower*=Math.exp(-dt*.72);u.nerveSource.value.copy(nerveSource);u.nerveStrength.value=nervePower;
+ if(!rareKind&&age>=nextRare){if(metrics&&metrics.edge<.4&&metrics.signal<.4)rareEvent();else nextRare=age+rand(20,55);}
+ if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
+ const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
+ u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
+ document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%');
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  lightRig.key.intensity=1.65+lightMood*.18;lightRig.rim.intensity=1.85+activity*.35;lightRig.fill.intensity=.60-lightMood*.13;lightRig.warm.intensity=.46+activity*.22;
@@ -113,7 +130,7 @@ async function loop(now){
   if(age>=nextSample&&!observing&&!senseError&&frame>3){
    nextSample=age+2.1;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
-   sim.observe().then(m=>{if(m)metrics=m;}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
+   sim.observe().then(m=>{if(m){metrics=m;if(!rareKind&&!pointerDown)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
   }
   perfFrames++;if(!perfStart)perfStart=now;
   if(now-perfStart>4500){const fps=perfFrames*1000/(now-perfStart);if(fps<28&&ratio>.65){ratio=Math.max(.65,ratio-.15);resize();}perfFrames=0;perfStart=now;}
@@ -133,7 +150,19 @@ async function start(){
  light('fill',0xa9c9ff,.60,v(-1.1,.35,-.7));light('rim',0xe7f1ff,1.85,v(.95,.88,.95));light('warm',0xffad73,.46,v(.15,-.6,.25));
  const backdrop=new THREE.Mesh(new THREE.PlaneGeometry(12,12),new THREE.MeshStandardMaterial({color:0x151922,roughness:.88,metalness:0}));
  backdrop.position.set(0,.5,.68);backdrop.rotation.y=Math.PI;backdrop.receiveShadow=true;scene.add(backdrop);
- sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim);scene.add(particles.object);
+ sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim,conf.shape);renderers.set(conf.shape,particles);scene.add(particles.object);
+ const shapeSelect=document.querySelector('#shape'),paletteSelect=document.querySelector('#palette'),colorSelect=document.querySelector('#color'),nerveToggle=document.querySelector('#nerves');
+ shapeSelect.value=conf.shape;paletteSelect.value=String(conf.paletteMode);colorSelect.value=conf.densityOnly?'0':'1';nerveToggle.checked=conf.nerves;
+ shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value);particles.update();};
+ paletteSelect.onchange=()=>{sim.uniforms.paletteMode.value=Number(paletteSelect.value);conf.paletteMode=Number(paletteSelect.value);};
+ colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
+ nerveToggle.onchange=()=>{conf.nerves=nerveToggle.checked;sim.uniforms.nervesEnabled.value=conf.nerves?1:0;};
+ document.querySelector('#learn').checked=conf.learn;
+ document.querySelector('#learn').onchange=e=>{policy.enabled=e.target.checked;};
+ document.querySelector('#rare').onclick=()=>rareEvent();
+ document.querySelector('#reset').onclick=()=>{policy.reset();policy.begin(state,metrics,age);};
+ if(params.has('rare')){const kind=rareNames.indexOf(params.get('rare'));nextRare=Infinity;rareEvent(kind>0?kind:1);}
+
  resize();status.textContent='Initializing material field…';window.addEventListener('resize',resize);
  const canvas=renderer.domElement;
  function pointerPos(e){const rect=canvas.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);const p=v();if(!raycaster.ray.intersectPlane(plane,p))return pointer.clone();const xScale=sim.uniforms.screenScale.value;return v(clamp(p.x*64/xScale+grid.x*.5,2,grid.x-2),clamp(p.y*64,2,grid.y-2),grid.z*.5);}
@@ -148,7 +177,7 @@ async function start(){
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape});
+ window.sculptureStatus=()=>({frame,age,particles:conf.particles,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount});
  schedule();
 }
 start().catch(fail);
