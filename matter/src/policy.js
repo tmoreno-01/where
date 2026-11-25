@@ -11,8 +11,8 @@ export class AdaptivePolicy {
  const dist=(a,b)=>a.reduce((s,x,i)=>s+Math.abs(x-b[i]),0)*.5;
  const novelty=this.history.length?Math.min(...this.history.map(h=>dist(m.distribution,h))):.5;
  this.lastNovelty=novelty;this.history.push(m.distribution.slice());if(this.history.length>18)this.history.shift();
- const contrast=clamp(m.densityContrast*.8),motion=clamp(m.speedContrast*.9),balance=clamp(1-Math.abs(m.entropy-.74)*2.7),spread=clamp(1-Math.abs(m.spread-.28)*4.2),walls=clamp((m.edge-.30)*1.6);
- const reward=clamp(.25*contrast+.19*motion+.20*balance+.14*spread+.22*clamp(novelty*3)-.18*walls);
+ const contrast=clamp(m.densityContrast*.8),motion=clamp(m.speedContrast*.9),balance=clamp(1-Math.abs(m.entropy-.85)*2.7),spread=clamp(1-Math.abs(Math.min(m.spreadX??.22,m.spreadY??.22)-.27)*5),coverage=clamp((m.coverage??.5)/.75),walls=clamp((m.edge-.35)*1.6);
+ const reward=clamp(.21*contrast+.16*motion+.17*balance+.18*spread+.12*coverage+.16*clamp(novelty*3)-.18*walls);
  if(Number.isFinite(reward))this.active.values.push(reward);
  }
  finish(){const a=this.active;this.active=null;if(!this.enabled||!a||!a.values.length)return;

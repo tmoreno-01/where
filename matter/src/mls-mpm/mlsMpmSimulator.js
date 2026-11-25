@@ -60,12 +60,15 @@ class mlsMpmSimulator {
         this.particleBuffer = new StructuredArray(particleStruct, maxParticles, "particleData");
 
         const vec = new THREE.Vector3();
+        const initialExtent=new THREE.Vector3(.95,.91,.65),initialMax=this.gridSize.clone().subScalar(2.02);
         for (let i = 0; i < maxParticles; i++) {
             let dist = 2;
             while (dist > 1) {
                 vec.set(Math.random(),Math.random(),Math.random()).multiplyScalar(2.0).subScalar(1.0);
                 dist = vec.length();
-                vec.multiplyScalar(0.8).addScalar(1.0).divideScalar(2.0).multiply(this.gridSize);
+                vec.multiply(initialExtent).addScalar(1.0).divideScalar(2.0).multiply(this.gridSize);
+                vec.clampScalar(2.02,Infinity);
+                vec.min(initialMax);
             }
             const mass = 1.0 - Math.random() * 0.002;
             this.particleBuffer.set(i, "position", vec);
@@ -109,6 +112,8 @@ class mlsMpmSimulator {
         this.uniforms.drive = uniform(0.8);
         this.uniforms.palette = uniform(0.0);
         this.uniforms.gather = uniform(0.0);
+        this.uniforms.spreadForce=uniform(new THREE.Vector3(.007,.009,0));
+        this.uniforms.spreadCenter=uniform(this.gridSize.clone().multiplyScalar(.5));
         this.uniforms.vortexC = uniform(new THREE.Vector3(12,22,28));
         this.uniforms.vortexD = uniform(new THREE.Vector3(48,42,20));
         this.uniforms.axisC = uniform(new THREE.Vector3(0,1,0));
@@ -394,7 +399,9 @@ class mlsMpmSimulator {
             const spinC = cross(this.uniforms.axisC,rc).mul(0.105).sub(rc.mul(0.012)).mul(wc);
             const spinD = cross(this.uniforms.axisD,rd).mul(0.095).sub(rd.mul(0.009)).mul(wd);
             const center = particlePosition.sub(vec3(this.uniforms.gridSize).mul(0.5));
-            const restoring = center.mul(this.uniforms.gather.mul(-0.016).sub(0.002));
+            // Broad screen-space expansion; keep depth coherent while permitting brief compression.
+            const restoring = center.mul(vec3(this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.009).sub(0.005)));
+            const spreadPush=particlePosition.sub(this.uniforms.spreadCenter).mul(this.uniforms.spreadForce).clamp(-0.56,0.56);
             const pulseR = particlePosition.sub(this.uniforms.pulseCenter);
             const impulse = pulseR.div(pulseR.length().max(2.0)).mul(this.uniforms.pulse).div(float(1).add(pulseR.dot(pulseR).div(380)));
             const normalizedPosition = particlePosition.div(vec3(this.uniforms.gridSize)).sub(0.5);
@@ -402,7 +409,7 @@ class mlsMpmSimulator {
             const tideBand = float(1).sub(tideCoord.abs().mul(5.5)).clamp(0,1).pow(2);
             const tideForce = this.uniforms.tideAxis.mul(tideBand).mul(this.uniforms.tideAmount);
             const filament = vec3(center.y.mul(0.14).add(center.z.mul(0.06)).add(time.mul(0.36)).sin(),center.z.mul(0.18).sub(center.x.mul(0.12)).sub(time.mul(0.24)).sin(),center.x.mul(0.12).add(center.y.mul(0.15)).add(time.mul(0.28)).sin()).mul(0.17);
-            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(this.uniforms.drift).mul(this.uniforms.dt));
+            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(spreadPush).add(this.uniforms.drift).mul(this.uniforms.dt));
 
             const cellIndex =  ivec3(particlePosition).sub(1).toConst("cellIndex");
             const cellDiff = particlePosition.fract().sub(0.5).toConst("cellDiff");
@@ -593,13 +600,14 @@ class mlsMpmSimulator {
         }
         if(n<480)return null;
         mean.divideScalar(n);
+        let spreadX=0,spreadY=0,spreadZ=0;
         for(let i=0;i<512;i++){
             const j=i*4,x=a[j]/size.x,y=a[j+1]/size.y,z=a[j+2]/size.z;
-            if(Number.isFinite(x+y+z))spread+=(x-mean.x)**2+(y-mean.y)**2+(z-mean.z)**2;
+            if(Number.isFinite(x+y+z)){spreadX+=(x-mean.x)**2;spreadY+=(y-mean.y)**2;spreadZ+=(z-mean.z)**2;spread+=(x-mean.x)**2+(y-mean.y)**2+(z-mean.z)**2;}
         }
         const distribution=hist.map(x=>x/n);
         const entropy=-distribution.reduce((sum,p)=>sum+(p>0?p*Math.log(p):0),0)/Math.log(64);
-        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution};
+        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),spreadX:Math.sqrt(spreadX/n),spreadY:Math.sqrt(spreadY/n),spreadZ:Math.sqrt(spreadZ/n),coverage:hist.filter(x=>x>=3).length/64,densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution};
     }
 
     setMouseRay(origin, direction, pos) {

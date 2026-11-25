@@ -17,6 +17,7 @@ let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,p
 const tideAxis=v(1,0,0);
 let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
 const drift=v(),driftGoal=v(),recent=[],lightRig={};
+const spreadForce=v(.007,.009,0),spreadCenter=grid.clone().multiplyScalar(.5);
 let renderer,sim,particles,camera,scene,raf=0,previous=0,age=0,frame=0,ratio=1,perfStart=0,perfFrames=0,paused=false,running=false,dead=false;
 let drive=.95,driveGoal=.95,gather=0,gatherGoal=0,palette=0,paletteGoal=0,noise=.75,noiseGoal=.75;
 let nextDecision=0,nextSample=0,observing=false,metrics=null,senseError=false,state='wake',stateSince=0,lightMood=0,lightGoal=0,pointerDown=false,exposure=1.0;
@@ -63,8 +64,8 @@ function rareEvent(kind){
 }
 function choose(){
  policy.finish();const m=metrics;
- const scores={gather:1,unfold:1,divide:1,orbit:1,wall:1,rest:0.45,shear:1.3,braid:1.4,burst:0.95};
- if(m){scores.gather+=clamp((m.spread-.26)*12,0,4);scores.unfold+=clamp((m.density-0.8)*3.5,0,4)+clamp((.22-m.spread)*14,0,3);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.wall+=m.edge<.12?1.4:-.8;scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);}
+ const scores={gather:.40,unfold:1.5,divide:1.15,orbit:1,wall:.85,rest:0.45,shear:1.45,braid:1.4,burst:0.95};
+ if(m){scores.gather+=clamp((m.spread-.43)*8,0,1.6);scores.unfold+=clamp((m.density-0.8)*2.4,0,2.8)+clamp((.26-Math.min(m.spreadX??.22,m.spreadY??.22))*16,0,3)+clamp((.60-(m.coverage??.5))*3,0,1.8);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.wall+=m.edge<.12?1.4:-.8;scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);}
  for(const k of modes){scores[k]+=rand(0,.65)+policy.bonus(k,m);if(recent.includes(k))scores[k]-=1.5;if(k===state)scores[k]-=3;}
  const choice=forced&&modes.includes(forced)?forced:modes.reduce((a,b)=>scores[a]>scores[b]?a:b);
  recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);policy.begin(choice,m,age);
@@ -75,14 +76,14 @@ function choose(){
  axis(2,rand(-1,1),rand(-1,1),rand(-1,1));axis(3,rand(-1,1),rand(-1,1),rand(-1,1));detailGoal=rand(.65,1.5);
  paceGoal=choice==='rest'?rand(.38,.49):choice==='burst'?rand(.83,.99):choice==='shear'||choice==='braid'?rand(.69,.82):rand(.49,.69);
  switch(choice){
- case 'gather':set(0,.40,.44,.47);set(1,.60,.56,.52);axis(0,.2,.1,1);axis(1,.1,.4,1);gatherGoal=.85;driveGoal=.66;noiseGoal=.43;break;
+ case 'gather':set(0,.40,.44,.47);set(1,.60,.56,.52);axis(0,.2,.1,1);axis(1,.1,.4,1);gatherGoal=.47;driveGoal=.66;noiseGoal=.43;break;
  case 'unfold':set(0,.12,.24,.47);set(1,.88,.76,.53);axis(0,.2,.1,1);axis(1,.1,.2,-1);gatherGoal=-.57;driveGoal=1.35;noiseGoal=.98;break;
  case 'divide':{const vertical=Math.random()<.4;set(0,vertical?.48:.20,vertical?.19:.48,.33);set(1,vertical?.52:.80,vertical?.81:.52,.69);axis(0,0,.3,1);axis(1,.2,0,-1);gatherGoal=-.18;driveGoal=1.55;noiseGoal=.55;break;}
- case 'orbit':set(0,.37,.50,.35);set(1,.63,.50,.65);axis(0,rand(-.4,.4),rand(-.4,.4),1);axis(1,rand(-.4,.4),rand(-.4,.4),1);gatherGoal=.22;driveGoal=1.5;noiseGoal=.75;break;
+ case 'orbit':set(0,.37,.50,.35);set(1,.63,.50,.65);axis(0,rand(-.4,.4),rand(-.4,.4),1);axis(1,rand(-.4,.4),rand(-.4,.4),1);gatherGoal=.02;driveGoal=1.5;noiseGoal=.75;break;
  case 'wall':{const side=Math.floor(rand(0,4));wallTarget.set(side===0?.06:side===1?.94:rand(.24,.76),side===2?.06:side===3?.94:rand(.25,.75),.5);set(0,wallTarget.x,wallTarget.y,.37);set(1,wallTarget.x,wallTarget.y,.66);axis(0,0,0,1);axis(1,.15,.1,-1);gatherGoal=-.12;driveGoal=1.08;noiseGoal=.52;break;}
- case 'rest':set(0,.44,.50,.40);set(1,.56,.50,.60);axis(0,.2,1,.2);axis(1,.2,1,-.2);gatherGoal=.17;driveGoal=.40;noiseGoal=.35;detailGoal=.38;break;
+ case 'rest':set(0,.44,.50,.40);set(1,.56,.50,.60);axis(0,.2,1,.2);axis(1,.2,1,-.2);gatherGoal=.02;driveGoal=.40;noiseGoal=.35;detailGoal=.38;break;
  case 'shear':set(0,.22,.35,.3);set(1,.78,.65,.7);axis(0,.3,.7,1);axis(1,-.3,.7,-1);gatherGoal=-.38;driveGoal=1.85;noiseGoal=.82;detailGoal=1.15;break;
- case 'braid':set(0,.3,.42,.4);set(1,.7,.58,.6);set(2,.46,.28,.66);set(3,.54,.72,.33);axis(0,.7,.1,1);axis(1,.7,.1,1);axis(2,0,.7,-1);axis(3,0,.7,-1);gatherGoal=.08;driveGoal=1.6;noiseGoal=.63;detailGoal=1.8;break;
+ case 'braid':set(0,.3,.42,.4);set(1,.7,.58,.6);set(2,.46,.28,.66);set(3,.54,.72,.33);axis(0,.7,.1,1);axis(1,.7,.1,1);axis(2,0,.7,-1);axis(3,0,.7,-1);gatherGoal=-.08;driveGoal=1.6;noiseGoal=.63;detailGoal=1.8;break;
  case 'burst':gatherGoal=-.7;driveGoal=1.65;noiseGoal=1.05;detailGoal=1.2;pulseCenter.copy((metrics?.mean||v(.5,.5,.5))).multiply(grid);pulse=2.1;break;
  }
 }
@@ -97,6 +98,13 @@ function direct(dt){
  for(let i=0;i<4;i++){origins[i].lerp(goals[i],a);axes[i].lerp(axisGoals[i],a*.65).normalize();}
  drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;palette+=(paletteGoal-palette)*a*.38;noise+=(noiseGoal-noise)*a;
  const u=sim.uniforms;u.vortexA.value.copy(origins[0]);u.vortexB.value.copy(origins[1]);u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
+ const m=metrics,compression=state==='gather'||rareKind===2;
+ const targetSpread=compression ? .205 : .275;
+ const sx=m?.spreadX??.215,sy=m?.spreadY??.205;
+ const fx=clamp(.004+(targetSpread-sx)*.085,-.003,.018),fy=clamp(.005+(targetSpread-sy)*.10,-.003,.020);
+ spreadForce.lerp(v(fx,fy,0),1-Math.exp(-dt*.23));
+ spreadCenter.lerp((m?.mean||v(.5,.5,.5)).clone().multiply(grid),1-Math.exp(-dt*.22));
+ u.spreadForce.value.copy(spreadForce);u.spreadCenter.value.copy(spreadCenter);
  u.vortexC.value.copy(origins[2]);u.vortexD.value.copy(origins[3]);u.axisC.value.copy(axes[2]);u.axisD.value.copy(axes[3]);
  detail+=(detailGoal-detail)*a;u.detailForce.value=detail;
  if(age>=nextPulse){nextPulse=age+rand(17,37);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(.8,1.8);}}
