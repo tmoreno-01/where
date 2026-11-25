@@ -136,6 +136,8 @@ class ParticleRenderer {
 
         this.uniforms.size = uniform(1);
         this.uniforms.chamberX = uniform(1);
+        this.uniforms.finishRoughness=uniform(.14);
+        this.uniforms.finishMetalness=uniform(.24);
         const vAo = varying(0, "vAo");
         const vNormal = varying(vec3(0), "v_normalView");
 
@@ -161,8 +163,9 @@ class ParticleRenderer {
         this.material.colorNode = particle.get("color");
         this.material.aoNode = vAo;
         if(!spheres)this.material.normalNode = normalize(vNormal);
-        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.07).add(0.27).sub(particle.get('memory').mul(0.08)).clamp(0.22,0.44);
-        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.055).clamp(0.0,0.085).add(particle.get('signal').mul(0.13)));
+        this.material.roughnessNode = this.uniforms.finishRoughness.add(particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).clamp(0,2).mul(0.025)).sub(particle.get('memory').mul(0.035)).clamp(0.10,0.78);
+        this.material.metalnessNode=this.uniforms.finishMetalness;
+        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.035).clamp(0.0,0.055).add(particle.get('signal').mul(0.11)));
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);
@@ -180,6 +183,8 @@ class ParticleRenderer {
         this.object.castShadow = conf.quality!=='mobile';
         this.object.receiveShadow = true;
     }
+
+    setFinish(finish){const p=finish==='metallic'?[.19,.78]:finish==='matte'?[.48,.10]:[.14,.24];this.uniforms.finishRoughness.value=p[0];this.uniforms.finishMetalness.value=p[1];}
 
     setChamberScale(x){this.uniforms.chamberX.value=x;this.object.position.x=-conf.gridX*x/128;}
 

@@ -12,7 +12,7 @@ origins.push(v(.30,.72,.28).multiply(grid),v(.70,.29,.75).multiply(grid));
 goals.push(origins[2].clone(),origins[3].clone());
 const axes=[v(.2,.4,1).normalize(),v(-.4,.6,-1).normalize(),v(.4,1,.3).normalize(),v(-1,.4,.5).normalize()],axisGoals=axes.map(x=>x.clone());
 const pointer=v(),pointerDelta=v(),pointerGoal=v(),clickCenter=v(),pulseCenter=v(),previousPointer=v();
-let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'studio';
+let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'gloss',finishMode=params.get('finish')||'glossy';
 let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=9,speedRef=1.0;
 const tideAxis=v(1,0,0);
 let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
@@ -24,10 +24,11 @@ let nextDecision=0,nextSample=0,observing=false,metrics=null,senseError=false,st
 const forced=params.get('mode');let wallTarget=v(.84,.72,.5);
 function environment(){
  const w=512,h=256,data=new Uint16Array(w*h*4);
- const boxes=[[.16,.28,.075,.16,7.5,7.8,8.1],[.42,.48,.016,.24,6.8,7.6,9.5],[.72,.32,.034,.15,8.2,4.8,2.8],[.63,.10,.18,.026,8.8,8.9,9.0],[.95,.62,.032,.13,2.5,4.1,7.2]];
+ // Broad neutral softbox plus narrow strip reflections and a darker surrounding studio.
+ const boxes=[[.12,.36,.085,.22,5.8,6.1,6.5],[.34,.43,.022,.27,7.3,7.6,8.0],[.69,.34,.032,.23,6.9,5.6,4.5],[.61,.13,.22,.033,5.4,5.8,6.2],[.92,.59,.043,.16,2.0,3.0,4.3],[.51,.76,.14,.052,1.2,1.4,1.6]];
  const half=THREE.DataUtils.toHalfFloat;
  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-  const u=x/w,t=y/h,i=(y*w+x)*4;let r=.025+.07*(1-t),g=.03+.08*(1-t),b=.04+.10*(1-t);
+  const u=x/w,t=y/h,i=(y*w+x)*4;let r=.017+.048*(1-t),g=.020+.055*(1-t),b=.026+.068*(1-t);
   for(const [cx,cy,sx,sy,rr,gg,bb] of boxes){const dx=Math.min(Math.abs(u-cx),1-Math.abs(u-cx))/sx,dy=(t-cy)/sy;const f=Math.exp(-Math.pow(dx,6)-Math.pow(dy,6));r+=rr*f;g+=gg*f;b+=bb*f;}
   data[i]=half(r);data[i+1]=half(g);data[i+2]=half(b);data[i+3]=half(1);
  }
@@ -40,6 +41,7 @@ function backdropTexture(){
  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;return tex;
 }
 const lightingPresets={
+ gloss:{key:1.35,rim:1.8,fill:.36,warm:.22,env:.68,exposure:.87,keyColor:0xfff5ed,rimColor:0xdbeaff,fillColor:0xb0c7ee,warmColor:0xffc39d},
  studio:{key:2.25,rim:2.4,fill:.55,warm:.32,env:.40,exposure:.86,keyColor:0xfff1dc,rimColor:0xc9e1ff,fillColor:0x9cb6f7,warmColor:0xffb17a},
  contrast:{key:2.55,rim:3.05,fill:.19,warm:.18,env:.24,exposure:.76,keyColor:0xffffff,rimColor:0xb1d1ff,fillColor:0xa0b9f4,warmColor:0xffaf84},
  spectral:{key:1.65,rim:2.15,fill:.85,warm:.45,env:.29,exposure:.82,keyColor:0xe0f2ff,rimColor:0xb698ff,fillColor:0x83d9e6,warmColor:0xffa45d}
@@ -131,7 +133,7 @@ function direct(dt){
  if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
- const look=lightingPresets[lightingMode]||lightingPresets.studio,la=1-Math.exp(-dt*4);
+ const look=lightingPresets[lightingMode]||lightingPresets.gloss,la=1-Math.exp(-dt*4);
  const intensities={key:look.key+lightMood*.12,rim:look.rim+activity*.24,fill:look.fill,warm:look.warm+activity*.14};
  for(const n of ['key','rim','fill','warm']){const l=lightRig[n];l.intensity+=(intensities[n]-l.intensity)*la;l.color.lerp(new THREE.Color(look[n+'Color']),la);}
  lightRig.key.position.set(-1.15+Math.sin(age*.031)*.19,1.42,-.82);
@@ -188,16 +190,16 @@ async function start(){
  renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ReinhardToneMapping;renderer.toneMappingExposure=.82;
  await renderer.init();if(!renderer.backend.isWebGPUBackend)throw Error('Unable to initialize the WebGPU backend.');
  renderer.shadowMap.enabled=conf.quality!=='mobile';renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.appendChild(renderer.domElement);
- scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.40;
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.68;
  camera=new THREE.OrthographicCamera(-1,1,.5,-.5,.015,10);camera.position.set(0,.5,-2.2);camera.lookAt(target);
- scene.add(new THREE.HemisphereLight(0xd6e2ff,0x292035,.30));
+ scene.add(new THREE.HemisphereLight(0xe2eaff,0x292035,.20));
  light('key',0xfff4ec,1.65,v(-.85,1.65,-.95),conf.quality!=='mobile');
  setShadows(shadowMode==='on'||(shadowMode==='auto'&&!conf.mobile&&conf.particles<200000));
  light('fill',0xa9c9ff,.60,v(-1.1,.35,-.7));light('rim',0xe7f1ff,1.85,v(.95,.88,.95));light('warm',0xffad73,.46,v(.15,-.6,.25));
  const backdrop=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,map:backdropTexture(),roughness:.96,metalness:0}));
  backdrop.name='studio backdrop';
  backdrop.position.set(0,.5,.68);backdrop.rotation.y=Math.PI;backdrop.receiveShadow=true;scene.add(backdrop);
- sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim,conf.shape);renderers.set(conf.shape,particles);scene.add(particles.object);
+ sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim,conf.shape);particles.setFinish(finishMode);renderers.set(conf.shape,particles);scene.add(particles.object);
  const shapeSelect=document.querySelector('#shape'),paletteSelect=document.querySelector('#palette'),colorSelect=document.querySelector('#color'),nerveToggle=document.querySelector('#nerves');
  shapeSelect.value=conf.shape;paletteSelect.value=String(conf.paletteMode);colorSelect.value=conf.densityOnly?'0':'1';nerveToggle.checked=conf.nerves;
  const solverSelect=document.querySelector('#solver'),shadowSelect=document.querySelector('#shadows');
@@ -207,13 +209,14 @@ async function start(){
  countSlider.min='5000';countSlider.max=String(conf.maxParticles);countSlider.step='1000';countSlider.value=String(conf.particles);
  countLabel.textContent=countFormat.format(conf.particles);
  countSlider.oninput=()=>{requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
- shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value);particles.update();};
+ shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value);particles.update();};
  paletteSelect.onchange=()=>{sim.uniforms.paletteMode.value=Number(paletteSelect.value);conf.paletteMode=Number(paletteSelect.value);};
  colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
  nerveToggle.onchange=()=>{conf.nerves=nerveToggle.checked;sim.uniforms.nervesEnabled.value=conf.nerves?1:0;};
  document.querySelector('#learn').checked=conf.learn;
  document.querySelector('#learn').onchange=e=>{policy.enabled=e.target.checked;};
- const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='studio';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
+ const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='gloss';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
+ const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='glossy';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);};
  document.querySelector('#rare').onclick=()=>rareEvent();
  document.querySelector('#reset').onclick=()=>{policy.reset();policy.begin(state,metrics,age);};
  if(params.has('rare')){const kind=rareNames.indexOf(params.get('rare'));nextRare=Infinity;rareEvent(kind>0?kind:1);}
@@ -232,7 +235,7 @@ async function start(){
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode});
+ window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,finish:finishMode});
  schedule();
 }
 start().catch(fail);
