@@ -139,6 +139,7 @@ class ParticleRenderer {
         this.uniforms.finishRoughness=uniform(.14);
         this.uniforms.finishMetalness=uniform(.24);
         const vAo = varying(0, "vAo");
+        const vIllumination=varying(float(1),"vIllumination");
         const vNormal = varying(vec3(0), "v_normalView");
 
         const particle = this.mlsMpmSim.particleBuffer.element(instanceIndex);
@@ -151,8 +152,9 @@ class ParticleRenderer {
             //return attribute("position").xyz.mul(0.1).add(positionAttribute.mul(vec3(1,1,0.4)));
             const mat = spheres ? null : calcLookAtMatrix(particleDirection.xyz);
             if(!spheres)vNormal.assign(transformNormalToView(mat.mul(normalLocal)));
-            vAo.assign(particlePosition.z.div(95));
-            vAo.assign(vAo.mul(vAo).oneMinus());
+            const shadow=particle.get('illumination').clamp(.15,1);
+            vIllumination.assign(shadow);
+            vAo.assign(shadow.mul(float(1).sub(particlePosition.z.div(95).pow(2).mul(.23))).clamp(.12,1));
             const speed = particle.get('velocity').length().mul(0.28).clamp(0,1);
             const local = attribute("position").xyz;
             const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).clamp(0.72,1.12);
@@ -160,12 +162,14 @@ class ParticleRenderer {
             if(capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
             return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
         })();
-        this.material.colorNode = particle.get("color");
+        // Retain a cool coloured bounce in dark regions while reducing diffuse light.
+        const bounce=mix(vec3(.40,.53,.77),vec3(1),vIllumination);
+        this.material.colorNode = particle.get("color").mul(bounce).mul(vIllumination.mul(.60).add(.40));
         this.material.aoNode = vAo;
         if(!spheres)this.material.normalNode = normalize(vNormal);
         this.material.roughnessNode = this.uniforms.finishRoughness.add(particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).clamp(0,2).mul(0.025)).sub(particle.get('memory').mul(0.035)).clamp(0.10,0.78);
         this.material.metalnessNode=this.uniforms.finishMetalness;
-        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.035).clamp(0.0,0.055).add(particle.get('signal').mul(0.11)));
+        this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.035).clamp(0.0,0.055).add(particle.get('signal').mul(0.11))).mul(vIllumination.mul(.65).add(.35));
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);

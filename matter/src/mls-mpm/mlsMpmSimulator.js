@@ -56,6 +56,7 @@ class mlsMpmSimulator {
             memory: { type: 'float' },
             signal: { type: 'float' },
             refractory: { type: 'float' },
+            illumination: { type: 'float' },
         };
         this.particleBuffer = new StructuredArray(particleStruct, maxParticles, "particleData");
 
@@ -74,6 +75,7 @@ class mlsMpmSimulator {
             this.particleBuffer.set(i, "position", vec);
             this.particleBuffer.set(i, "mass", mass);
             this.particleBuffer.set(i, "direction", [0,1,0]);
+            this.particleBuffer.set(i, "illumination", 1);
         }
 
         const cellCount = this.gridSize.x * this.gridSize.y * this.gridSize.z;
@@ -85,6 +87,7 @@ class mlsMpmSimulator {
         };
         this.cellBuffer = new StructuredArray(cellStruct, cellCount, "cellData");
         this.cellBufferF = instancedArray(cellCount, 'vec4').label('cellDataF');
+        this.lightField=instancedArray(cellCount,'float').label('lightTransmission');
         const nx=Math.ceil(conf.gridX/4),ny=Math.ceil(conf.gridY/4),nz=Math.ceil(conf.gridZ/4), nerveCount=nx*ny*nz;
         this.nerveGrid=new StructuredArray({sum:{type:'int',atomic:true},count:{type:'int',atomic:true}},nerveCount,'nerveGrid');
         this.nerveRead=instancedArray(nerveCount,'float').label('nerveRead');
@@ -112,6 +115,8 @@ class mlsMpmSimulator {
         this.uniforms.drive = uniform(0.8);
         this.uniforms.palette = uniform(0.0);
         this.uniforms.gather = uniform(0.0);
+        this.uniforms.lightDirection=uniform(new THREE.Vector3(-.6,.52,-.62).normalize());
+        this.uniforms.fieldShadows=uniform(1.0);
         this.uniforms.spreadForce=uniform(new THREE.Vector3(.007,.009,0));
         this.uniforms.spreadCenter=uniform(this.gridSize.clone().multiplyScalar(.5));
         this.uniforms.vortexC = uniform(new THREE.Vector3(12,22,28));
@@ -359,6 +364,29 @@ class mlsMpmSimulator {
             this.cellBufferF.element(instanceIndex).assign(vec4(vx,vy,vz,mass));
         })().compute(cellCount);
 
+        // Approximate directional transmittance through the occupied simulation grid.
+        // Compute once per grid cell, instead of tracing individual capsule meshes.
+        this.kernels.lightField=Fn(()=>{
+            If(instanceIndex.greaterThanEqual(uint(cellCount)),()=>{Return();});
+            const size=this.uniforms.gridSize;
+            const p=ivec3(int(instanceIndex).div(size.y.mul(size.z)),int(instanceIndex).div(size.z).mod(size.y),int(instanceIndex).mod(size.z)).toConst('lightCell');
+            const density=this.cellBufferF.element(instanceIndex).w;
+            If(density.lessThan(0.01),()=>{this.lightField.element(instanceIndex).assign(1);Return();});
+            const opticalDepth=float(0).toVar('opticalDepth');
+            const scale=this.uniforms.restDensity.max(0.001);
+            for(const [distance,weight] of [[1.5,.17],[3.5,.22],[6.5,.26],[10.5,.25],[16,.20],[24,.15]]){
+                const q=ivec3(vec3(p).add(this.uniforms.lightDirection.mul(distance))).toConst();
+                const inside=q.x.greaterThanEqual(0).and(q.y.greaterThanEqual(0)).and(q.z.greaterThanEqual(0)).and(q.x.lessThan(size.x)).and(q.y.lessThan(size.y)).and(q.z.lessThan(size.z));
+                If(inside,()=>{
+                    const mass=this.cellBufferF.element(getCellPtr(q)).w;
+                    opticalDepth.addAssign(mass.div(scale).clamp(0,3).mul(weight));
+                });
+            }
+            const local=density.div(scale).clamp(0,3).mul(.15);
+            const extinction=opticalDepth.add(local);
+            const transmission=float(1).div(float(1).add(extinction.mul(1.65)).add(extinction.mul(extinction).mul(.8))).clamp(.15,1);
+            this.lightField.element(instanceIndex).assign(transmission);
+        })().compute(cellCount);
         this.kernels.g2p = Fn(() => {
             If(instanceIndex.greaterThanEqual(uint(this.uniforms.numParticles)), () => {
                 Return();
@@ -421,6 +449,7 @@ class mlsMpmSimulator {
 
             const B = mat3(0).toVar("B");
             const sampledDensity=float(0).toVar('sampledDensity');
+            const sampledLight=float(0).toVar('sampledLight');
             Loop({ start: 0, end: 3, type: 'int', name: 'gx', condition: '<' }, ({gx}) => {
                 Loop({ start: 0, end: 3, type: 'int', name: 'gy', condition: '<' }, ({gy}) => {
                     Loop({ start: 0, end: 3, type: 'int', name: 'gz', condition: '<' }, ({gz}) => {
@@ -432,6 +461,9 @@ class mlsMpmSimulator {
                         const gv=this.cellBufferF.element(cellPtr).toConst('gridSample');
                         const weightedVelocity = gv.xyz.mul(weight).toConst("weightedVelocity");
                         sampledDensity.addAssign(gv.w.mul(weight));
+                        If(this.uniforms.fieldShadows.greaterThan(0.01),()=>{
+                            sampledLight.addAssign(this.lightField.element(cellPtr).mul(weight));
+                        });
                         const term = mat3(
                             weightedVelocity.mul(cellDist.x),
                             weightedVelocity.mul(cellDist.y),
@@ -447,6 +479,9 @@ class mlsMpmSimulator {
                 particleDensity.assign(mix(particleDensity,sampledDensity,0.09));
                 densitySlot.assign(particleDensity);
             });
+            const illumination=this.particleBuffer.element(instanceIndex).get('illumination');
+            const shaded=mix(float(1),sampledLight.clamp(.15,1),this.uniforms.fieldShadows);
+            illumination.assign(mix(illumination,shaded,.16));
             const dist = cross(this.uniforms.mouseRayDirection, particlePosition.mul(vec3(this.uniforms.screenScale,1,0.65)).sub(this.uniforms.mouseRayOrigin)).length()
             const force = dist.mul(0.1).oneMinus().max(0.0).pow(2);
             //particleVelocity.assign(mix(particleVelocity, this.uniforms.mouseForce.mul(6), force));
@@ -668,7 +703,9 @@ class mlsMpmSimulator {
             if(conf.nerves && this.tick%2===0)kernels.push(this.kernels.nerveClear,this.kernels.nerveDeposit,this.kernels.nerveResolve,this.kernels.nerveSpread);
             kernels.push(this.kernels.clearGrid,this.kernels.p2g1);
             if(conf.solver==='classic')kernels.push(this.kernels.p2g2);
-            kernels.push(this.kernels.updateGrid,this.kernels.g2p);this.tick++;
+            kernels.push(this.kernels.updateGrid);
+            if(this.uniforms.fieldShadows.value>0.01 && this.tick%2===0)kernels.push(this.kernels.lightField);
+            kernels.push(this.kernels.g2p);this.tick++;
             await this.renderer.computeAsync(kernels);
         }
     }
