@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import {Fn, attribute, triNoise3D, time, vec3, vec4, float, varying,instanceIndex,mix,normalize,cross,mat3,normalLocal,transformNormalToView,mx_hsvtorgb,mrt,uniform} from "three/tsl";
+import {Fn, attribute, triNoise3D, time, vec3, vec4, float, varying,instanceIndex,mix,normalize,cross,mat3,normalLocal,transformNormalToView,mx_hsvtorgb,mrt,uniform,select} from "three/tsl";
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {conf} from "../conf.js";
 
@@ -8,7 +8,7 @@ export const calcLookAtMatrix = /*#__PURE__*/ Fn( ( [ target_immutable ] ) => {
     const target = vec3( target_immutable ).toVar();
     const ww = normalize(target.add(vec3(0.000001,0.000001,0.000001))).toVar();
     // Closed-form stable orthonormal basis (no nearly parallel cross-product).
-    const signZ=ww.z.greaterThanEqual(0).select(float(1),float(-1));
+    const signZ=select(ww.z.greaterThanEqual(0),float(1),float(-1));
     const a=float(-1).div(signZ.add(ww.z));
     const b=ww.x.mul(ww.y).mul(a);
     const uu=vec3(float(1).add(signZ.mul(ww.x.mul(ww.x)).mul(a)),signZ.mul(b),signZ.mul(ww.x).negate());
