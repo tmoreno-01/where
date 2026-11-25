@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101017"><title>Where / living field</title><style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111017;color:#fff;font:12px/1.4 Arial,Helvetica,sans-serif}canvas{display:block;width:100%;height:100%;touch-action:pan-y}#ui{position:fixed;left:18px;right:18px;bottom:max(16px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:space-between;pointer-events:none;mix-blend-mode:difference}#ui span{letter-spacing:.11em;text-transform:uppercase}#buttons{display:flex;gap:12px;pointer-events:auto}button{background:none;color:inherit;border:0;padding:9px;cursor:pointer;font:inherit;letter-spacing:.07em}button:hover{opacity:.65}#error{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center}#error[hidden]{display:none}body.clean #ui{display:none}
+</style></head><body><canvas id="field" aria-label="Continuously evolving synthetic botanical field"></canvas><div id="error" hidden></div><div id="ui"><span>where — field 001</span><div id="buttons"><button id="pause">pause</button><button id="seed">new field</button><button id="full">fullscreen</button></div></div>
+<script type="module">
+const canvas=document.querySelector('canvas'), error=document.querySelector('#error');
+const gl=canvas.getContext('webgl2',{alpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:false,powerPreference:'high-performance'});
+if(!gl){error.hidden=false;error.textContent='This artwork needs WebGL 2. Try a recent Chrome, Firefox or Safari browser.';throw Error('WebGL 2 unavailable');}
+const vert=`#version 300 es
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`;
+const common=`
+precision highp float;
+uniform vec2 size;
+uniform vec2 screenSize;
+uniform float time;
+uniform float seed;
+uniform vec4 a[10];
+uniform vec4 b[10];
+uniform sampler2D state;
+out vec4 frag;
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7))+seed*.71)*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+1.),f.x),f.y);}
+float fb(vec2 p){return .55*noise(p)+.28*noise(p*2.06+5.)+.12*noise(p*4.17+13.)+.05*noise(p*8.33);}
+vec2 world(vec2 uv){return (uv-.5)*screenSize/min(screenSize.x,screenSize.y);}
+vec2 flow(vec2 p){float t=time*.075;return vec2(sin(p.y*5.2+t+2.*noise(p*3.)),cos(p.x*4.6-t+2.*noise(p*3.+9.)))+.4*vec2(cos(p.y*11.-t),sin(p.x*9.+t));}
+float lobe(vec2 p,vec4 f,vec4 g,out float r,out float l,out float vein){
+ vec2 q=(p-f.xy)/max(f.z,.001);
+ float ang=atan(q.y,q.x)+f.w;
+ r=length(q);float n=g.x;
+ float phase=ang*n+sin(ang*2.+g.y)*.55;
+ l=.5+.5*cos(phase);
+ float shape=.52+.43*pow(l,.65)+.07*sin(ang*3.+g.y)+.035*sin(ang*11.+g.y);
+ float core=.235+.04*cos(ang*(n+2.)+g.y);
+ vein=pow(.5+.5*cos(phase+sin(r*11.)*.25),8.)*smoothstep(.2,.6,r);
+ return max(1.-r/shape, (core-r)*2.);
+}
+`;
+const sim=`#version 300 es
+${common}
+void main(){
+ vec2 uv=gl_FragCoord.xy/size,p=world(uv),px=1./size;
+ vec2 adv=uv-flow(p)*px*.55;
+ vec4 c=texture(state,clamp(adv,px,1.-px));
+ vec4 avg=(texture(state,adv+vec2(px.x,0))+texture(state,adv-vec2(px.x,0))+texture(state,adv+vec2(0,px.y))+texture(state,adv-vec2(0,px.y)))*.25;
+ float target=fb(p*3.4+vec2(time*.027,-time*.019));
+ float nutrient=smoothstep(.33,.60,target);
+ float source=0.,pigment=0.;
+ for(int i=0;i<10;i++){float r,l,v;float d=lobe(p,a[i],b[i],r,l,v);float m=smoothstep(-.12,.15,d)*b[i].w;source=max(source,m);pigment+=m*b[i].z*.17;}
+ float u=c.r+(avg.r-c.r)*.28;
+ float v=c.g+(avg.g-c.g)*.22;
+ float excite=smoothstep(.12,.4,u)*(1.-v);
+ u=mix(u,max(source*.95,nutrient*.78),.032);
+ u+=.009*excite-.007*v;
+ v=mix(v,u,.016);
+ float col=mix(c.b,clamp(.25+pigment+.45*target,0.,1.),.022);
+ float trace=mix(c.a,max(source,abs(u-v)*1.4),.017);
+ frag=clamp(vec4(u,v,col,trace),0.,1.);
+}`;
+const draw=`#version 300 es
+${common}
+vec3 acid=vec3(.83,.78,.025),yellow=vec3(1.,.83,.10),pink=vec3(1.,.25,.65),peach=vec3(1.,.61,.40),cream=vec3(1.,.94,.78),lilac=vec3(.77,.66,1.);
+vec3 palette(float h){h=fract(h);return mix(mix(yellow,pink,smoothstep(.04,.49,h)),mix(peach,lilac,smoothstep(.57,.94,h)),smoothstep(.45,.61,h));}
+void main(){
+ vec2 uv=gl_FragCoord.xy/size,p=world(uv);
+ vec4 c=texture(state,uv);
+ vec2 q=p+flow(p)*.065+vec2(fb(p*7.+time*.02),fb(p*6.-time*.016+13.))*.12;
+ float n=fb(q*3.5),fine=fb(q*12.+vec2(time*.013,0));
+ float field=.59*n+.41*c.r+.06*sin(q.x*12.+q.y*6.+time*.13);
+ float threshold=.43+.05*sin(time*.11+seed);
+ float d=field-threshold;
+ float aa=max(fwidth(d),.002);
+ vec2 g=abs(fract(p*17.+.5)-.5)/max(fwidth(p*17.),vec2(.0001));
+ float grid=1.-smoothstep(.15,1.2,min(g.x,g.y));
+ vec3 bg=vec3(.038,.034,.063)+grid*vec3(.24,.21,.27);
+ vec3 tissue=mix(acid,yellow,smoothstep(.48,.73,field));
+ tissue=mix(tissue,pink,smoothstep(.28,.5,fine)*smoothstep(.06,.10,d)*.68);
+ tissue=mix(tissue,peach,smoothstep(.64,.77,fine)*.6);
+ float ring=exp(-abs(d-.016)*105.);
+ float ring2=exp(-abs(d-.044)*73.);
+ tissue=mix(tissue,pink,ring2*.85);
+ tissue=mix(tissue,cream,ring*.94);
+ tissue*=.87+.19*noise(q*25.)+.08*sin(field*44.);
+ vec3 col=mix(bg,tissue,smoothstep(-aa,aa,d));
+ float best=-10.;vec3 flower=col;float mask=0.;
+ for(int i=0;i<10;i++){
+  vec4 f=a[i],k=b[i];float r,l,v;
+  vec2 z=p+vec2(noise(p*10.+k.y),noise(p*9.+k.y+5.))*.032*f.z;
+  float s=lobe(z,f,k,r,l,v);
+  float life=k.w;
+  float edge=smoothstep(-.012,.012,s)*smoothstep(0.,.18,life);
+  if(s>best && edge>.001){
+   best=s;mask=edge;
+   float h=fract(k.z+.19*r+.19*l+.07*sin(r*18.+k.y));
+   vec3 base=palette(h);
+   base=mix(base,yellow,smoothstep(.29,.65,l)*(.55+.22*sin(k.y)));
+   base=mix(base,pink,(1.-smoothstep(.03,.17,s))*.78);
+   base=mix(base,cream,exp(-abs(s-.009)*160.)*.84);
+   base=mix(base,pink,v*.25);
+   float core=1.-smoothstep(.18,.245,r);
+   float ang=atan(z.y-f.y,z.x-f.x)+f.w;
+   float cells=.5+.5*cos(ang*(k.x+2.)+r*13.);
+   vec3 heart=mix(lilac,cream,smoothstep(.45,.73,cells));
+   heart=mix(heart,yellow,1.-smoothstep(.065,.105,r));
+   base=mix(base,heart,core);
+   float shade=.89+.12*sin(r*8.+ang*2.)+.09*fb(z*18.);
+   flower=base*shade;
+  }
+ }
+ col=mix(col,flower,mask);
+ float film=(hash(gl_FragCoord.xy)-.5)*.025;
+ frag=vec4(clamp(col+film,0.,1.),1.);
+}`;
+function shader(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s}
+function program(src){const p=gl.createProgram();const v=shader(gl.VERTEX_SHADER,vert),f=shader(gl.FRAGMENT_SHADER,src);gl.attachShader(p,v);gl.attachShader(p,f);gl.linkProgram(p);gl.deleteShader(v);gl.deleteShader(f);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));return {p,u:Object.fromEntries(['size','screenSize','time','seed','a[0]','b[0]','state'].map(n=>[n,gl.getUniformLocation(p,n)]))}}
+let simulation,render;try{simulation=program(sim);render=program(draw)}catch(e){error.hidden=false;error.textContent='Unable to start the artwork: '+e.message;throw e}
+gl.bindVertexArray(gl.createVertexArray());gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);
+let targets=[],front=0,sw=0,sh=0,scale=.88,seed=Math.random()*1000,agents=[],clock=0,last=0,paused=false,raf=0,elapsed=0,frames=0;
+const A=new Float32Array(40),B=new Float32Array(40);
+function createTarget(w,h){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Framebuffer unavailable');gl.clearColor(.18,.1,.35,0);gl.clear(gl.COLOR_BUFFER_BIT);return {t,f}}
+function resize(){const w=canvas.clientWidth,h=canvas.clientHeight,dpr=Math.min(devicePixelRatio||1,1.65);canvas.width=Math.max(2,Math.round(w*dpr*scale));canvas.height=Math.max(2,Math.round(h*dpr*scale));const ratio=Math.min(1,640/Math.min(w,h),1024/Math.max(w,h));const nw=Math.max(2,Math.round(w*ratio)),nh=Math.max(2,Math.round(h*ratio));if(nw!==sw||nh!==sh||!targets.length){for(const x of targets){gl.deleteTexture(x.t);gl.deleteFramebuffer(x.f)}sw=nw;sh=nh;targets=[createTarget(sw,sh),createTarget(sw,sh)];front=0}gl.bindFramebuffer(gl.FRAMEBUFFER,null)}
+const rnd=(a,b)=>a+(b-a)*Math.random();
+function spawn(i,initial=false){const aspect=canvas.clientWidth/Math.max(1,canvas.clientHeight),w=Math.max(1,aspect),h=Math.max(1,1/aspect);return {x:rnd(-w*.48,w*.48),y:rnd(-h*.48,h*.48),r:rnd(.13,.36),rot:rnd(0,6.28),n:Math.floor(rnd(4,9)),phase:rnd(0,6.28),hue:rnd(0,1),life:initial?rnd(5,18):0,ttl:rnd(28,64),vx:rnd(-.011,.011),vy:rnd(-.011,.011),id:i}}
+function reset(){seed=Math.random()*1000;agents=Array.from({length:10},(_,i)=>spawn(i,true));clock=0;for(const x of targets){gl.bindFramebuffer(gl.FRAMEBUFFER,x.f);gl.clearColor(.18,.1,.35,0);gl.clear(gl.COLOR_BUFFER_BIT)}gl.bindFramebuffer(gl.FRAMEBUFFER,null);front=0}
+function update(dt){for(let i=0;i<agents.length;i++){let x=agents[i];x.life+=dt;if(x.life>=x.ttl){x=agents[i]=spawn(i)}const age=x.life,fade=Math.min(1,age/6,(x.ttl-age)/8),growth=Math.max(.015,Math.sin(Math.min(1,age/12)*Math.PI/2)*Math.min(1,(x.ttl-age)/8));let cx=x.x+Math.sin(clock*.11+x.phase)*.055+x.vx*age*.28,cy=x.y+Math.cos(clock*.13+x.phase)*.06+x.vy*age*.28;for(let j=0;j<i;j++){const dx=cx-A[j*4],dy=cy-A[j*4+1],d=Math.hypot(dx,dy),min=(x.r+A[j*4+2])*.46;if(d>1e-4&&d<min){const push=(min-d)*.16;cx+=dx/d*push;cy+=dy/d*push}}
+A.set([cx,cy,x.r*growth*(1+.09*Math.sin(clock*.25+x.phase)),x.rot+clock*.035*Math.sin(x.phase)],i*4);B.set([x.n,x.phase+clock*.14,x.hue,Math.max(0,fade)],i*4)}}
+function pass(o,w,h,tex){gl.useProgram(o.p);const u=o.u;gl.viewport(0,0,w,h);gl.uniform2f(u.size,w,h);gl.uniform2f(u.screenSize,canvas.clientWidth,canvas.clientHeight);gl.uniform1f(u.time,clock);gl.uniform1f(u.seed,seed);gl.uniform4fv(u['a[0]'],A);gl.uniform4fv(u['b[0]'],B);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.uniform1i(u.state,0);gl.drawArrays(gl.TRIANGLES,0,3)}
+function tick(now){raf=0;if(paused||document.hidden)return;const dt=last?Math.min(.05,(now-last)/1000):1/60;last=now;clock+=dt;update(dt);gl.bindFramebuffer(gl.FRAMEBUFFER,targets[1-front].f);pass(simulation,sw,sh,targets[front].t);front=1-front;gl.bindFramebuffer(gl.FRAMEBUFFER,null);pass(render,canvas.width,canvas.height,targets[front].t);
+elapsed+=dt;frames++;if(elapsed>3){const fps=frames/elapsed;if(fps<28&&scale>.5){scale=Math.max(.5,scale-.12);resize()}elapsed=0;frames=0}raf=requestAnimationFrame(tick)}
+function start(){if(!raf&&!paused&&!document.hidden){last=0;raf=requestAnimationFrame(tick)}}
+function stop(){if(raf)cancelAnimationFrame(raf);raf=0;last=0}
+resize();reset();update(0);start();
+window.addEventListener('resize',()=>{resize();if(paused){gl.bindFramebuffer(gl.FRAMEBUFFER,null);pass(render,canvas.width,canvas.height,targets[front].t)}});
+document.addEventListener('visibilitychange',()=>document.hidden?stop():start());
+document.querySelector('#pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'resume':'pause';paused?stop():start()};
+document.querySelector('#seed').onclick=()=>{reset();update(0);if(paused){gl.bindFramebuffer(gl.FRAMEBUFFER,null);pass(render,canvas.width,canvas.height,targets[front].t)}};
+document.querySelector('#full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch{document.body.classList.toggle('clean')}};
+document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click()}});
+if(new URLSearchParams(location.search).has('clean'))document.body.classList.add('clean');
+canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();stop();error.hidden=false;error.textContent='Graphics context lost. Reload to restart.'});canvas.addEventListener('webglcontextrestored',()=>location.reload());
+</script></body></html>
