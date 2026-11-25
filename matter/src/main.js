@@ -11,7 +11,9 @@ origins.push(v(.30,.72,.28).multiply(grid),v(.70,.29,.75).multiply(grid));
 goals.push(origins[2].clone(),origins[3].clone());
 const axes=[v(.2,.4,1).normalize(),v(-.4,.6,-1).normalize(),v(.4,1,.3).normalize(),v(-1,.4,.5).normalize()],axisGoals=axes.map(x=>x.clone());
 const pointer=v(),pointerDelta=v(),pointerGoal=v(),clickCenter=v(),pulseCenter=v();
-let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=4,speedRef=1.3;
+let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=9,speedRef=1.0;
+const tideAxis=v(1,0,0);
+let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
 const drift=v(),driftGoal=v(),recent=[],lightRig={};
 let renderer,sim,particles,camera,scene,raf=0,previous=0,age=0,frame=0,ratio=1,perfStart=0,perfFrames=0,paused=false,running=false,dead=false;
 let drive=.95,driveGoal=.95,gather=0,gatherGoal=0,palette=0,paletteGoal=0,noise=.75,noiseGoal=.75;
@@ -41,12 +43,13 @@ function choose(){
  if(m){scores.gather+=clamp((m.spread-.26)*12,0,4);scores.unfold+=clamp((m.density-0.8)*3.5,0,4)+clamp((.22-m.spread)*14,0,3);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.wall+=m.edge<.12?1.4:-.8;scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);}
  for(const k of modes){scores[k]+=rand(0,.95);if(recent.includes(k))scores[k]-=1.5;if(k===state)scores[k]-=3;}
  const choice=forced&&modes.includes(forced)?forced:modes.reduce((a,b)=>scores[a]>scores[b]?a:b);
- recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(7,18);
+ recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);
  const set=(i,x,y,z)=>goals[i].set(x,y,z).multiply(grid);
  const axis=(i,x,y,z)=>axisGoals[i].set(x,y,z).normalize();
  driftGoal.set(0,0,0);gatherGoal=0;paletteGoal=rand(-.65,.65);lightGoal=rand(-.75,.75);
  set(2,rand(.15,.85),rand(.15,.85),rand(.15,.85));set(3,rand(.15,.85),rand(.15,.85),rand(.15,.85));
  axis(2,rand(-1,1),rand(-1,1),rand(-1,1));axis(3,rand(-1,1),rand(-1,1),rand(-1,1));detailGoal=rand(.65,1.5);
+ paceGoal=choice==='rest'?rand(.38,.49):choice==='burst'?rand(.83,.99):choice==='shear'||choice==='braid'?rand(.69,.82):rand(.49,.69);
  switch(choice){
  case 'gather':set(0,.40,.44,.47);set(1,.60,.56,.52);axis(0,.2,.1,1);axis(1,.1,.4,1);gatherGoal=.85;driveGoal=.66;noiseGoal=.43;break;
  case 'unfold':set(0,.12,.24,.47);set(1,.88,.76,.53);axis(0,.2,.1,1);axis(1,.1,.2,-1);gatherGoal=-.57;driveGoal=1.35;noiseGoal=.98;break;
@@ -56,7 +59,7 @@ function choose(){
  case 'rest':set(0,.44,.50,.40);set(1,.56,.50,.60);axis(0,.2,1,.2);axis(1,.2,1,-.2);gatherGoal=.17;driveGoal=.40;noiseGoal=.35;detailGoal=.38;break;
  case 'shear':set(0,.22,.35,.3);set(1,.78,.65,.7);axis(0,.3,.7,1);axis(1,-.3,.7,-1);gatherGoal=-.38;driveGoal=1.85;noiseGoal=.82;detailGoal=1.15;break;
  case 'braid':set(0,.3,.42,.4);set(1,.7,.58,.6);set(2,.46,.28,.66);set(3,.54,.72,.33);axis(0,.7,.1,1);axis(1,.7,.1,1);axis(2,0,.7,-1);axis(3,0,.7,-1);gatherGoal=.08;driveGoal=1.6;noiseGoal=.63;detailGoal=1.8;break;
- case 'burst':gatherGoal=-.7;driveGoal=1.65;noiseGoal=1.05;detailGoal=1.2;pulseCenter.copy((metrics?.mean||v(.5,.5,.5))).multiply(grid);pulse=2.9;break;
+ case 'burst':gatherGoal=-.7;driveGoal=1.65;noiseGoal=1.05;detailGoal=1.2;pulseCenter.copy((metrics?.mean||v(.5,.5,.5))).multiply(grid);pulse=2.1;break;
  }
 }
 function direct(dt){
@@ -66,17 +69,21 @@ function direct(dt){
   driftGoal.set(clamp((wallTarget.x-m.x)*.62,-.34,.34),clamp((wallTarget.y-m.y)*.62,-.34,.34),0).multiplyScalar(f);
   if(metrics&&metrics.edge>.27){driftGoal.multiplyScalar(-.65);nextDecision=Math.min(nextDecision,age+3);}
  }
- const a=1-Math.exp(-dt*.24);
+ const a=1-Math.exp(-dt*.17);
  for(let i=0;i<4;i++){origins[i].lerp(goals[i],a);axes[i].lerp(axisGoals[i],a*.65).normalize();}
  drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;palette+=(paletteGoal-palette)*a*.38;noise+=(noiseGoal-noise)*a;
  const u=sim.uniforms;u.vortexA.value.copy(origins[0]);u.vortexB.value.copy(origins[1]);u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  u.vortexC.value.copy(origins[2]);u.vortexD.value.copy(origins[3]);u.axisC.value.copy(axes[2]);u.axisD.value.copy(axes[3]);
  detail+=(detailGoal-detail)*a;u.detailForce.value=detail;
- if(age>=nextPulse){nextPulse=age+rand(8,20);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(1.25,2.6);}}
- pulse*=Math.exp(-dt*1.1);u.pulse.value=pulse;u.pulseCenter.value.copy(pulseCenter);
+ if(age>=nextPulse){nextPulse=age+rand(17,37);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(.8,1.8);}}
+ pulse*=Math.exp(-dt*.85);u.pulse.value=pulse;u.pulseCenter.value.copy(pulseCenter);
+ pace+=(paceGoal-pace)*(1-Math.exp(-dt*.32));conf.speed=pace;
+ if(age>=nextTide){tideStart=age;tideDuration=rand(9,18);nextTide=age+tideDuration+rand(13,32);tideAxis.set(rand(-1,1),rand(-1,1),rand(-.35,.35)).normalize();tideStrength=rand(.24,.65);}
+ const tideProgress=clamp((age-tideStart)/tideDuration,0,1);
+ u.tideAxis.value.copy(tideAxis);u.tidePhase.value=-.85+tideProgress*1.7;u.tideAmount.value=Math.sin(Math.PI*tideProgress)*tideStrength;
  speedRef+=(clamp((metrics?.speed||1.1)*1.12,.55,4.5)-speedRef)*(1-Math.exp(-dt*.16));u.speedRef.value=speedRef;
- pointerDelta.lerp(pointerGoal,1-Math.exp(-dt*20));pointerGoal.multiplyScalar(Math.exp(-dt*8));
- pointerStrength+=((pointerDown?1:0)-pointerStrength)*(1-Math.exp(-dt*15));
+ pointerDelta.lerp(pointerGoal,1-Math.exp(-dt*12));pointerGoal.multiplyScalar(Math.exp(-dt*6));
+ pointerStrength+=((pointerDown?1:0)-pointerStrength)*(1-Math.exp(-dt*9));
  pointerPulse*=Math.exp(-dt*3.2);
  u.pointer.value.copy(pointer);u.pointerDelta.value.copy(pointerDelta);u.pointerActive.value=pointerStrength;u.pointerPulse.value=pointerPulse;u.clickCenter.value.copy(clickCenter);
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
@@ -130,8 +137,8 @@ async function start(){
  resize();status.textContent='Initializing material field…';window.addEventListener('resize',resize);
  const canvas=renderer.domElement;
  function pointerPos(e){const rect=canvas.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);const p=v();if(!raycaster.ray.intersectPlane(plane,p))return pointer.clone();const xScale=sim.uniforms.screenScale.value;return v(clamp(p.x*64/xScale+grid.x*.5,2,grid.x-2),clamp(p.y*64,2,grid.y-2),grid.z*.5);}
- canvas.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();pointerDown=true;pointer.copy(pointerPos(e));clickCenter.copy(pointer);pointerGoal.set(0,0,0);pointerDelta.set(0,0,0);pointerPulse=17;lastPointerTime=performance.now();canvas.setPointerCapture(e.pointerId);});
- canvas.addEventListener('pointermove',e=>{if(!pointerDown)return;e.preventDefault();const p=pointerPos(e),now=performance.now(),dt=Math.max(.008,Math.min(.12,(now-lastPointerTime)/1000));pointerGoal.copy(p).sub(pointer).multiplyScalar(.038/dt).clampLength(0,8.0);pointer.copy(p);lastPointerTime=now;});
+ canvas.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();pointerDown=true;pointer.copy(pointerPos(e));clickCenter.copy(pointer);pointerGoal.set(0,0,0);pointerDelta.set(0,0,0);pointerPulse=7.5;lastPointerTime=performance.now();canvas.setPointerCapture(e.pointerId);});
+ canvas.addEventListener('pointermove',e=>{if(!pointerDown)return;e.preventDefault();const p=pointerPos(e),now=performance.now(),dt=Math.max(.008,Math.min(.12,(now-lastPointerTime)/1000));pointerGoal.copy(p).sub(pointer).multiplyScalar(.028/dt).clampLength(0,4.5);pointer.copy(p);lastPointerTime=now;});
  const release=()=>{pointerDown=false;pointerGoal.set(0,0,0);};
  canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);window.addEventListener('blur',release);
  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();else schedule();});
@@ -141,7 +148,7 @@ async function start(){
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,quality:conf.quality,shape:conf.spheres?'spheres':'rods'});
+ window.sculptureStatus=()=>({frame,age,particles:conf.particles,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.spheres?'spheres':'rods'});
  schedule();
 }
 start().catch(fail);

@@ -6,10 +6,10 @@ const initialAspect = Math.max(.45,Math.min(2.4,innerWidth/Math.max(1,innerHeigh
 const gridX = Math.round(Math.max(32,Math.min(120,initialAspect*60+4))/4)*4;
 const count=quality==='mobile'?12000:quality==='low'?24000:quality==='medium'?100000:quality==='high'?200000:300000;
 export const conf = {
-  maxParticles:count, particles:count, quality, mobile, spheres:q.get('shape')!=='rods', densityOnly:q.get('color')==='density', paletteMode:q.get('palette')==='acid'?1:q.get('palette')==='ember'?2:0,
+  maxParticles:count, particles:count, quality, mobile, spheres:q.get('shape')!=='rods', densityOnly:q.get('color')==='density', paletteMode:q.get('palette')==='acid'?1:q.get('palette')==='ember'?2:0, memory:q.get('memory')!=='off',
   gridX, gridY:64, gridZ:48,
-  bloom:false, run:true, noise:0.95, speed:1.10, stiffness:3, restDensity:1,
-  density:1.05, dynamicViscosity:0.09, gravity:0,
+  bloom:false, run:true, noise:0.80, speed:0.68, stiffness:3, restDensity:1,
+  density:1.05, dynamicViscosity:0.12, gravity:0,
   gravitySensorReading:new THREE.Vector3(),accelerometerReading:new THREE.Vector3(),
   actualSize:1, size:1.27, points:false,
   updateParams(){const level=Math.max(this.particles/8192,1);this.actualSize=1.6/Math.pow(level,1/3)*this.size;this.restDensity=0.25*level*this.density*(64*64*64)/(this.gridX*this.gridY*this.gridZ);}

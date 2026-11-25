@@ -154,7 +154,7 @@ class ParticleRenderer {
         this.material.colorNode = particle.get("color");
         this.material.aoNode = vAo;
         if(!conf.spheres)this.material.normalNode = normalize(vNormal);
-        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.075).add(0.34).clamp(0.34,0.52);
+        this.material.roughnessNode = particle.get('density').div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.075).add(0.34).sub(particle.get('memory').mul(0.12)).clamp(0.23,0.52);
         this.material.emissiveNode = particle.get('color').mul(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(0.25)).mul(0.055).clamp(0.0,0.085));
 
         //this.material.fragmentNode = vec4(0,0,0,1);

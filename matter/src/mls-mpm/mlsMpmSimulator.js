@@ -52,6 +52,7 @@ class mlsMpmSimulator {
             C: { type: 'mat3' },
             direction: { type: 'vec3' },
             color: { type: 'vec3' },
+            memory: { type: 'float' },
         };
         this.particleBuffer = new StructuredArray(particleStruct, maxParticles, "particleData");
 
@@ -114,6 +115,10 @@ class mlsMpmSimulator {
         this.uniforms.pointerDelta = uniform(new THREE.Vector3());
         this.uniforms.pointerActive = uniform(0.0);
         this.uniforms.pointerPulse = uniform(0.0);
+        this.uniforms.memoryEnabled = uniform(conf.memory?1.0:0.0);
+        this.uniforms.tideAxis = uniform(new THREE.Vector3(1,0,0));
+        this.uniforms.tidePhase = uniform(0.0);
+        this.uniforms.tideAmount = uniform(0.0);
         this.uniforms.clickCenter = uniform(new THREE.Vector3());
         this.uniforms.drift = uniform(new THREE.Vector3());
         this.uniforms.screenScale = uniform(1.0);
@@ -297,6 +302,8 @@ class mlsMpmSimulator {
             const particleDensity = this.particleBuffer.element(instanceIndex).get('density').toConst("particleDensity");
             const particlePosition = this.particleBuffer.element(instanceIndex).get('position').xyz.toVar("particlePosition");
             const prevVelocity = this.particleBuffer.element(instanceIndex).get('velocity').xyz.toConst("prevVelocity");
+            const memoryNode = this.particleBuffer.element(instanceIndex).get('memory');
+            const oldMemory = memoryNode.toConst("oldMemory");
             const particleVelocity = vec3(0).toVar();
             If(this.uniforms.gravityType.equal(uint(2)), () => {
                 const pn = particlePosition.div(vec3(this.uniforms.gridSize.sub(1))).sub(0.5).normalize().toConst();
@@ -325,8 +332,12 @@ class mlsMpmSimulator {
             const restoring = center.mul(this.uniforms.gather.mul(-0.016).sub(0.002));
             const pulseR = particlePosition.sub(this.uniforms.pulseCenter);
             const impulse = pulseR.div(pulseR.length().max(2.0)).mul(this.uniforms.pulse).div(float(1).add(pulseR.dot(pulseR).div(380)));
+            const normalizedPosition = particlePosition.div(vec3(this.uniforms.gridSize)).sub(0.5);
+            const tideCoord = normalizedPosition.dot(this.uniforms.tideAxis).sub(this.uniforms.tidePhase);
+            const tideBand = float(1).sub(tideCoord.abs().mul(5.5)).clamp(0,1).pow(2);
+            const tideForce = this.uniforms.tideAxis.mul(tideBand).mul(this.uniforms.tideAmount);
             const filament = vec3(center.y.mul(0.14).add(center.z.mul(0.06)).add(time.mul(0.36)).sin(),center.z.mul(0.18).sub(center.x.mul(0.12)).sub(time.mul(0.24)).sin(),center.x.mul(0.12).add(center.y.mul(0.15)).add(time.mul(0.28)).sin()).mul(0.17);
-            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(restoring).add(this.uniforms.drift).mul(this.uniforms.dt));
+            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(this.uniforms.drift).mul(this.uniforms.dt));
 
             const cellIndex =  ivec3(particlePosition).sub(1).toConst("cellIndex");
             const cellDiff = particlePosition.fract().sub(0.5).toConst("cellDiff");
@@ -364,18 +375,20 @@ class mlsMpmSimulator {
             const pOffset = particlePosition.sub(this.uniforms.pointer).mul(vec3(this.uniforms.screenScale,1,0));
             const pDist = pOffset.length().max(0.18);
             const pUnit = pOffset.div(pDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
-            const influence = float(1).sub(pDist.div(14.0)).clamp(0,1).pow(2);
+            const influence = float(1).sub(pDist.div(12.5)).clamp(0,1).pow(2);
             const delta = this.uniforms.pointerDelta;
-            const stir = delta.mul(2.8).add(pUnit.mul(2.2)).add(vec3(pUnit.y.negate(),pUnit.x,0).mul(delta.length().mul(0.58)));
+            const stir = delta.mul(1.25).add(pUnit.mul(0.85)).add(vec3(pUnit.y.negate(),pUnit.x,0).mul(delta.length().mul(0.26)));
             particleVelocity.addAssign(stir.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt));
             const clickOffset = particlePosition.sub(this.uniforms.clickCenter).mul(vec3(this.uniforms.screenScale,1,0));
             const clickDist = clickOffset.length().max(0.18);
             const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
-            const clickWeight = float(1).sub(clickDist.div(23.0)).clamp(0,1).pow(2);
+            const clickWeight = float(1).sub(clickDist.div(17.0)).clamp(0,1).pow(2);
             particleVelocity.addAssign(clickDir.mul(clickWeight).mul(this.uniforms.pointerPulse).mul(this.uniforms.dt));
             const edgeLow = vec3(7,7,5).sub(particlePosition).max(0);
             const edgeHigh = particlePosition.sub(vec3(this.uniforms.gridSize).sub(vec3(7,7,5))).max(0);
             particleVelocity.addAssign(edgeLow.sub(edgeHigh).mul(0.16).mul(this.uniforms.dt));
+            // Recent disturbance slightly changes local mobility; slowly relaxes back.
+            particleVelocity.mulAssign(float(0.997).add(oldMemory.mul(0.002).mul(this.uniforms.memoryEnabled)));
             particleVelocity.mulAssign(particleMass);
             particleVelocity.mulAssign(float(1).min(float(5.2).div(particleVelocity.length().max(0.001))));
 
@@ -406,6 +419,11 @@ class mlsMpmSimulator {
             const speed = rawSpeed.div(rawSpeed.add(0.58)).clamp(0,1);
             const accel = particleVelocity.sub(prevVelocity).length().mul(1.8).clamp(0,1);
             const heading = particleVelocity.x.div(particleVelocity.length().max(0.001));
+            const contact = influence.mul(this.uniforms.pointerActive).mul(0.7).add(clickWeight.mul(this.uniforms.pointerPulse).mul(0.10));
+            const excitation = accel.mul(0.22).add(contact).add(tideBand.mul(this.uniforms.tideAmount.abs()).mul(0.15)).clamp(0,1);
+            const retained = oldMemory.mul(float(1).sub(this.uniforms.dt.mul(0.018))).clamp(0,1);
+            const memory = retained.add(excitation.mul(this.uniforms.dt).mul(0.18).mul(float(1).sub(retained))).clamp(0,1).mul(this.uniforms.memoryEnabled);
+            memoryNode.assign(memory);
             const energy = speed.mul(0.86).add(den.div(den.add(1)).mul(0.12)).add(accel.mul(0.07)).add(heading.mul(0.035));
             const densitySignal = den.div(den.add(0.50));
             const t = mix(densitySignal,energy,this.uniforms.colorMix).add(this.uniforms.palette.mul(0.028)).clamp(0,1);
@@ -428,7 +446,9 @@ class mlsMpmSimulator {
             const emberB = mix(emberA,vec3(0.79,0.045,0.075),t.sub(0.35).mul(3.0).clamp(0,1));
             const emberC = mix(emberB,vec3(0.85,0.36,0.018),t.sub(0.68).mul(3.13).clamp(0,1));
             const pigment = mix(mix(spectrum,acidC,select(this.uniforms.paletteMode.equal(1),float(1),float(0))),emberC,select(this.uniforms.paletteMode.equal(2),float(1),float(0)));
-            const illuminated = pigment.mul(speed.mul(0.28).add(0.80)).mul(accel.mul(0.13).add(0.94));
+            const afterimage = mix(vec3(0.19,0.035,0.52),vec3(0.72,0.10,0.20),memory);
+            const remembered = mix(pigment,afterimage,memory.mul(0.72).mul(this.uniforms.colorMix));
+            const illuminated = remembered.mul(speed.mul(0.28).add(0.80)).mul(accel.mul(0.13).add(0.94));
             const oldColor = this.particleBuffer.element(instanceIndex).get('color');
             const color = mix(oldColor,illuminated,0.16);
             this.particleBuffer.element(instanceIndex).get('color').assign(color);
