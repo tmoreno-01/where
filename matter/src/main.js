@@ -14,6 +14,8 @@ const axes=[v(.2,.4,1).normalize(),v(-.4,.6,-1).normalize(),v(.4,1,.3).normalize
 const pointer=v(),pointerDelta=v(),pointerGoal=v(),clickCenter=v(),pulseCenter=v(),previousPointer=v();
 let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'sculptural',finishMode=params.get('finish')||'glossy';
 let fieldShadowMode=params.get('fieldshadow')||'deep';
+let brightness=1;
+const visibleFraction=.76;
 let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=9,speedRef=1.0;
 const tideAxis=v(1,0,0);
 let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
@@ -45,7 +47,7 @@ const lightingPresets={
  sculptural:{key:1.85,rim:1.40,fill:.17,warm:.12,env:.66,exposure:.94,keyColor:0xfff1dd,rimColor:0xaccdff,fillColor:0x6b8cce,warmColor:0xe5a887},
  gloss:{key:1.10,rim:1.45,fill:.25,warm:.18,env:.95,exposure:.94,keyColor:0xfff5ed,rimColor:0xdbeaff,fillColor:0xb0c7ee,warmColor:0xffc39d},
  studio:{key:2.25,rim:2.4,fill:.55,warm:.32,env:.40,exposure:.86,keyColor:0xfff1dc,rimColor:0xc9e1ff,fillColor:0x9cb6f7,warmColor:0xffb17a},
- contrast:{key:2.55,rim:3.05,fill:.19,warm:.18,env:.24,exposure:.76,keyColor:0xffffff,rimColor:0xb1d1ff,fillColor:0xa0b9f4,warmColor:0xffaf84},
+ contrast:{key:2.90,rim:3.15,fill:.28,warm:.22,env:.88,exposure:1.04,keyColor:0xffffff,rimColor:0xb1d1ff,fillColor:0xa0b9f4,warmColor:0xffaf84},
  spectral:{key:1.65,rim:2.15,fill:.85,warm:.45,env:.29,exposure:.82,keyColor:0xe0f2ff,rimColor:0xb698ff,fillColor:0x83d9e6,warmColor:0xffa45d}
 };
 function light(name,color,intensity,pos,shadow=false){
@@ -142,12 +144,12 @@ function direct(dt){
  lightRig.rim.position.set(.95+Math.sin(age*.027)*.16,.72,.88);
  // Convert the world-space key direction into the simulation's nonuniform grid.
  const keyVector=lightRig.key.position.clone().sub(target);
- keyVector.x/=Math.max(.01,u.screenScale.value);keyVector.z/=.65;
+ keyVector.x/=Math.max(.01,u.screenScale.value);keyVector.y/=Math.max(.01,u.screenScaleY.value);keyVector.z/=.65;
  u.lightDirection.value.copy(keyVector.normalize());
  const shadowAmount=fieldShadowMode==='off'?0:fieldShadowMode==='soft'?.52:1;
  u.fieldShadows.value+=(shadowAmount-u.fieldShadows.value)*(1-Math.exp(-dt*4));
  scene.environmentIntensity+=(look.env-scene.environmentIntensity)*la;
- exposure+=(look.exposure-activity*.035-exposure)*(1-Math.exp(-dt*3));renderer.toneMappingExposure=exposure;
+ exposure+=((look.exposure-activity*.035)*brightness-exposure)*(1-Math.exp(-dt*3));renderer.toneMappingExposure=exposure;
 }
 function setShadows(enabled){if(shadowActive===enabled&&renderer.shadowMap.enabled===enabled)return;shadowActive=enabled;renderer.shadowMap.enabled=enabled;lightRig.key.castShadow=enabled;}
 function resize(){
@@ -155,8 +157,9 @@ function resize(){
  const aspect=innerWidth/Math.max(1,innerHeight),hh=61.8/128;
  camera.left=-hh*aspect;camera.right=hh*aspect;camera.top=hh;camera.bottom=-hh;camera.updateProjectionMatrix();
  const bg=scene?.getObjectByName('studio backdrop');if(bg)bg.scale.set(2*hh*aspect*1.04,2*hh*1.04,1);
- const scaleX=60*aspect/(conf.gridX-4);
- if(particles){particles.setChamberScale(scaleX);sim.uniforms.screenScale.value=scaleX;}
+ // Keep the physical boundary outside the camera on every aspect ratio.
+ const scaleX=2*hh*64*aspect/(conf.gridX*visibleFraction),scaleY=2*hh*64/(conf.gridY*visibleFraction);
+ if(particles){particles.setChamberScale(scaleX,scaleY);sim.uniforms.screenScale.value=scaleX;sim.uniforms.screenScaleY.value=scaleY;}
  renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
 }
 function fail(e){console.error(e);dead=true;status.hidden=false;status.textContent='This experiment requires a working WebGPU browser and graphics adapter. '+(e?.message||String(e));}
@@ -217,12 +220,14 @@ async function start(){
  countSlider.min='5000';countSlider.max=String(conf.maxParticles);countSlider.step='1000';countSlider.value=String(conf.particles);
  countLabel.textContent=countFormat.format(conf.particles);
  countSlider.oninput=()=>{requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
- shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value);particles.update();};
+ shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value,sim.uniforms.screenScaleY.value);particles.update();};
  paletteSelect.onchange=()=>{sim.uniforms.paletteMode.value=Number(paletteSelect.value);conf.paletteMode=Number(paletteSelect.value);};
  colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
  nerveToggle.onchange=()=>{conf.nerves=nerveToggle.checked;sim.uniforms.nervesEnabled.value=conf.nerves?1:0;};
  document.querySelector('#learn').checked=conf.learn;
  document.querySelector('#learn').onchange=e=>{policy.enabled=e.target.checked;};
+ const brightnessSlider=document.querySelector('#brightness'),brightnessLabel=document.querySelector('#brightnessLabel');
+ brightnessSlider.oninput=()=>{brightness=Number(brightnessSlider.value);brightnessLabel.textContent=Math.round(brightness*100)+'%';};
  const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='sculptural';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
  const fieldSelect=document.querySelector('#fieldShadow');if(!['deep','soft','off'].includes(fieldShadowMode))fieldShadowMode='deep';fieldSelect.value=fieldShadowMode;fieldSelect.onchange=()=>{fieldShadowMode=fieldSelect.value;};
  const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='glossy';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);};
@@ -232,7 +237,7 @@ async function start(){
 
  resize();status.textContent='Initializing material field…';window.addEventListener('resize',resize);
  const canvas=renderer.domElement;
- function pointerPos(e){const rect=canvas.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);const p=v();if(!raycaster.ray.intersectPlane(plane,p))return pointer.clone();const xScale=sim.uniforms.screenScale.value;return v(clamp(p.x*64/xScale+grid.x*.5,2,grid.x-2),clamp(p.y*64,2,grid.y-2),grid.z*.5);}
+ function pointerPos(e){const rect=canvas.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);const p=v();if(!raycaster.ray.intersectPlane(plane,p))return pointer.clone();const xScale=sim.uniforms.screenScale.value,yScale=sim.uniforms.screenScaleY.value;return v(clamp(p.x*64/xScale+grid.x*.5,2,grid.x-2),clamp((p.y-.5)*64/yScale+grid.y*.5,2,grid.y-2),grid.z*.5);}
  canvas.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();pointerDown=true;pointer.copy(pointerPos(e));previousPointer.copy(pointer);clickCenter.copy(pointer);pointerGoal.set(0,0,0);pointerDelta.set(0,0,0);pendingClick=1.25;pointerPulse=2.8;dragDirty=false;lastPointerTime=performance.now();canvas.setPointerCapture(e.pointerId);});
  canvas.addEventListener('pointermove',e=>{if(!pointerDown)return;e.preventDefault();const p=pointerPos(e),now=performance.now(),dt=Math.max(.008,Math.min(.12,(now-lastPointerTime)/1000));pointerGoal.copy(p).sub(previousPointer).multiplyScalar(.022/dt).clampLength(0,3.0);pointer.copy(p);dragDirty=true;lastPointerTime=now;});
  const release=()=>{pointerDown=false;};
@@ -244,7 +249,7 @@ async function start(){
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,fieldShadows:fieldShadowMode,finish:finishMode});
+ window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }
 start().catch(fail);

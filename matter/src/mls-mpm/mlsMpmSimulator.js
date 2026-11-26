@@ -151,6 +151,7 @@ class mlsMpmSimulator {
         this.uniforms.clickCenter = uniform(new THREE.Vector3());
         this.uniforms.drift = uniform(new THREE.Vector3());
         this.uniforms.screenScale = uniform(1.0);
+        this.uniforms.screenScaleY=uniform(1.0);
         this.uniforms.sampleStride = uniform(1,'uint');
         this.telemetry = instancedArray(1024,'vec4').label('telemetry');
 
@@ -485,25 +486,25 @@ class mlsMpmSimulator {
             const force = dist.mul(0.1).oneMinus().max(0.0).pow(2);
             //particleVelocity.assign(mix(particleVelocity, this.uniforms.mouseForce.mul(6), force));
             // Pointer forces operate across the visible depth, not a single surface.
-            const screenUnits=vec3(this.uniforms.screenScale,1,0);
+            const screenUnits=vec3(this.uniforms.screenScale,this.uniforms.screenScaleY,0);
             const segment=this.uniforms.pointer.sub(this.uniforms.pointerPrevious).mul(screenUnits);
             const fromStart=particlePosition.sub(this.uniforms.pointerPrevious).mul(screenUnits);
             const along=fromStart.dot(segment).div(segment.dot(segment).max(0.001)).clamp(0,1);
             const pOffset=fromStart.sub(segment.mul(along));
             const pDist = pOffset.length().max(0.18);
-            const pUnit = pOffset.div(pDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
+            const pUnit = pOffset.div(pDist).mul(vec3(float(1).div(this.uniforms.screenScale),float(1).div(this.uniforms.screenScaleY),0));
             const influence = float(1).sub(pDist.div(11.5).pow(2)).clamp(0,1).pow(2);
             const delta = this.uniforms.pointerDelta;
             const dragLength=segment.length().toConst('dragLength');
-            const dragUnit=segment.div(dragLength.max(0.001)).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
+            const dragUnit=segment.div(dragLength.max(0.001)).mul(vec3(float(1).div(this.uniforms.screenScale),float(1).div(this.uniforms.screenScaleY),0));
             const tangent=vec3(pUnit.y.negate(),pUnit.x,0);
             const dragAmount=dragLength.mul(0.36).clamp(0,1.35);
             const dragKick=dragUnit.mul(1.2).add(pUnit.mul(0.82)).add(tangent.mul(0.20)).mul(influence).mul(dragAmount).mul(this.uniforms.pointerDrag).toConst('dragKick');
             particleVelocity.addAssign(dragKick);
             particleVelocity.addAssign(pUnit.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt).mul(0.32));
-            const clickOffset = particlePosition.sub(this.uniforms.clickCenter).mul(vec3(this.uniforms.screenScale,1,0));
+            const clickOffset = particlePosition.sub(this.uniforms.clickCenter).mul(vec3(this.uniforms.screenScale,this.uniforms.screenScaleY,0));
             const clickDist = clickOffset.length().max(0.18);
-            const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),1,0));
+            const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),float(1).div(this.uniforms.screenScaleY),0));
             const clickWeight = float(1).sub(clickDist.div(13.5).pow(2)).clamp(0,1).pow(2);
             const clickKick=clickDir.mul(clickWeight).mul(this.uniforms.clickImpulse).toConst('clickKick');
             particleVelocity.addAssign(clickKick.mul(1.55));

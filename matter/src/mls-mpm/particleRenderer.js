@@ -135,6 +135,7 @@ class ParticleRenderer {
 
         this.uniforms.size = uniform(1);
         this.uniforms.chamberX = uniform(1);
+        this.uniforms.chamberY = uniform(1);
         this.uniforms.finishRoughness=uniform(.15);
         this.uniforms.finishMetalness=uniform(.04);
         this.uniforms.coat=uniform(1.0);
@@ -171,9 +172,9 @@ class ParticleRenderer {
             const speed = particle.get('velocity').length().mul(0.28).clamp(0,1);
             const local = attribute("position").xyz;
             const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).clamp(0.72,1.12);
-            if(spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
-            if(capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
-            return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,1,0.65)));
+            if(spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
+            if(capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
+            return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
         })();
         const n=normalize(vNormal);
         const bounce=mix(vec3(.52,.65,.86),vec3(1),vIllumination);
@@ -197,7 +198,7 @@ class ParticleRenderer {
         const strip=card(.72,.18,.67,.07,.47);
         const top=card(.04,.86,.50,.42,.085);
         const fresnel=float(.24).add(float(.76).mul(float(1).sub(n.z.abs()).pow(3)));
-        const reflectedTint=mix(vec3(1),vPigment.mul(.78).add(.16),this.uniforms.finishMetalness);
+        const reflectedTint=mix(vec3(1),vPigment.mul(.82).add(.24),this.uniforms.finishMetalness);
         const cards=vec3(1,.93,.82).mul(key).add(vec3(.56,.75,1).mul(strip.mul(.80))).add(vec3(.83,.91,1).mul(top.mul(.50)));
         const polish=cards.mul(reflectedTint).mul(fresnel).mul(this.uniforms.cardStrength).mul(vIllumination.mul(.63).add(.37));
         this.material.emissiveNode=vPigment.mul(vEnergy.mul(.018).add(vSignal.mul(.055))).mul(vIllumination.mul(.65).add(.35)).add(polish);
@@ -220,12 +221,12 @@ class ParticleRenderer {
     }
 
     setFinish(finish){
-        const p=finish==='metallic'?[.11,.92,.10,.10,1.20,1.1]:finish==='matte'?[.60,.02,0,.55,.025,.25]:[.15,.04,1,.075,.82,1.0];
+        const p=finish==='metallic'?[.11,.92,.10,.10,1.55,1.1]:finish==='matte'?[.60,.02,0,.55,.025,.25]:[.15,.04,1,.075,.82,1.0];
         const keys=['finishRoughness','finishMetalness','coat','coatRoughness','cardStrength','cardSharpness'];
         keys.forEach((k,i)=>{this.uniforms[k].value=p[i];});
     }
 
-    setChamberScale(x){this.uniforms.chamberX.value=x;this.object.position.x=-conf.gridX*x/128;}
+    setChamberScale(x,y=1){this.uniforms.chamberX.value=x;this.uniforms.chamberY.value=y;this.object.position.x=-conf.gridX*x/128;this.object.position.y=.5-conf.gridY*y/128;}
 
     update() {
         const { particles, bloom, actualSize } = conf;
