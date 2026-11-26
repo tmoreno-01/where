@@ -3,6 +3,7 @@ import Simulator from './mls-mpm/mlsMpmSimulator.js';
 import ParticleRenderer from './mls-mpm/particleRenderer.js';
 import {conf} from './conf.js';
 import {AdaptivePolicy} from './policy.js';
+import {paletteNames,paletteStops,selectStudy} from './palettes.js';
 const stage=document.querySelector('#stage'),status=document.querySelector('#status'),params=new URLSearchParams(location.search);
 const v=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z),rand=(a,b)=>a+(b-a)*Math.random(),clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
 const target=v(0,.5,.24),raycaster=new THREE.Raycaster(),plane=new THREE.Plane(v(0,0,-1),.24);
@@ -15,13 +16,16 @@ const pointer=v(),pointerDelta=v(),pointerGoal=v(),clickCenter=v(),pulseCenter=v
 let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'contrast',finishMode=params.get('finish')||'metallic';
 let fieldShadowMode=params.get('fieldshadow')||'deep';
 let brightness=1.15;
-const visibleFraction=.92;
+const visibleFraction=.87;
 let hostVisible=true,viewportVisible=true;
 let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=9,speedRef=1.0;
 const tideAxis=v(1,0,0);
 let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
 const drift=v(),driftGoal=v(),recent=[],lightRig={};
-const spreadForce=v(.007,.009,0),spreadCenter=grid.clone().multiplyScalar(.5);
+const spreadForce=v(.007,.009,0),spreadCenter=grid.clone().multiplyScalar(.5),edgeBias=v();
+let activeStudy=conf.paletteMode<0?Math.floor(Math.random()*6):conf.paletteMode;
+let studyRecent=[activeStudy],nextStudy=30,studyCurrent=paletteStops[activeStudy].map(c=>v(...c)),studyGoal=paletteStops[activeStudy].map(c=>v(...c));
+function changeStudy(i){activeStudy=i;studyGoal=paletteStops[i].map(c=>v(...c));studyRecent.push(i);if(studyRecent.length>3)studyRecent.shift();}
 let renderer,sim,particles,camera,scene,raf=0,previous=0,age=0,frame=0,ratio=1,perfStart=0,perfFrames=0,paused=false,running=false,dead=false;
 let drive=.95,driveGoal=.95,gather=0,gatherGoal=0,palette=0,paletteGoal=0,noise=.75,noiseGoal=.75;
 let nextDecision=0,nextSample=0,observing=false,metrics=null,senseError=false,state='wake',stateSince=0,lightMood=0,lightGoal=0,pointerDown=false,exposure=1.0;
@@ -106,12 +110,21 @@ function direct(dt){
  drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;palette+=(paletteGoal-palette)*a*.38;noise+=(noiseGoal-noise)*a;
  const u=sim.uniforms;u.vortexA.value.copy(origins[0]);u.vortexB.value.copy(origins[1]);u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  const m=metrics,compression=state==='gather'||rareKind===2;
- const targetSpread=compression ? .205 : .265;
+ const targetSpread=compression ? .205 : .285;
  const sx=m?.spreadX??.215,sy=m?.spreadY??.205;
  const fx=clamp(.004+(targetSpread-sx)*.085,-.003,.018),fy=clamp(.005+(targetSpread-sy)*.10,-.003,.020);
  spreadForce.lerp(v(fx,fy,0),1-Math.exp(-dt*.23));
  spreadCenter.lerp((m?.mean||v(.5,.5,.5)).clone().multiply(grid),1-Math.exp(-dt*.22));
  u.spreadForce.value.copy(spreadForce);u.spreadCenter.value.copy(spreadCenter);
+ // Slowly re-balance empty sides without imposing constant uniform coverage.
+ const sides=m?.sides||[.06,.06,.06,.06];
+ const bx=compression?0:clamp((sides[0]-sides[1])*.62,-.095,.095);
+ const by=compression?0:clamp((sides[2]-sides[3])*.62,-.095,.095);
+ edgeBias.lerp(v(bx,by,0),1-Math.exp(-dt*.18));u.edgeBias.value.copy(edgeBias);
+ if(conf.paletteMode<0&&age>=nextStudy&&!rareKind){
+   changeStudy(selectStudy(state,m,studyRecent));nextStudy=age+rand(28,65);
+ }
+ for(let i=0;i<5;i++){studyCurrent[i].lerp(studyGoal[i],1-Math.exp(-dt*.36));u.pigmentStops[i].value.copy(studyCurrent[i]);}
  u.vortexC.value.copy(origins[2]);u.vortexD.value.copy(origins[3]);u.axisC.value.copy(axes[2]);u.axisD.value.copy(axes[3]);
  detail+=(detailGoal-detail)*a;u.detailForce.value=detail;
  if(age>=nextPulse){nextPulse=age+rand(17,37);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(.8,1.8);}}
@@ -135,7 +148,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent=rareKind?rareNames[rareKind]:({gather:'condensing',unfold:'unfolding',divide:'dividing',orbit:'circulating',wall:'drifting',rest:'resting',shear:'shearing',braid:'weaving',burst:'expanding',wake:'awakening'}[state]||state);document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.sculptural,la=1-Math.exp(-dt*4);
@@ -157,7 +170,7 @@ function updateVisibleBounds(){
  const u=sim.uniforms,halfX=grid.x*visibleFraction*.5,halfY=grid.y*visibleFraction*.5;
  // Conservative mesh radius in world units, including density and stretched cuboids.
  const extent=conf.shape==='rods'?1.85:conf.shape==='capsules'?1.19:.61;
- const pad=extent*conf.actualSize*1.12+.08;
+ const pad=extent*conf.actualSize*1.12+.005;
  const sx=u.screenScale.value,sy=u.screenScaleY.value;
  const minX=Math.max(2.04,grid.x*.5-halfX+pad/sx),minY=Math.max(2.04,grid.y*.5-halfY+pad/sy);
  u.visibleMin.value.set(minX,minY,2.04);
@@ -221,7 +234,7 @@ async function start(){
  const backdrop=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,map:backdropTexture(),roughness:.96,metalness:0}));
  backdrop.name='studio backdrop';
  backdrop.position.set(0,.5,.68);backdrop.rotation.y=Math.PI;backdrop.receiveShadow=true;scene.add(backdrop);
- sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim,conf.shape);particles.setFinish(finishMode);renderers.set(conf.shape,particles);scene.add(particles.object);
+ sim=new Simulator(renderer);await sim.init();for(let i=0;i<5;i++)sim.uniforms.pigmentStops[i].value.copy(studyCurrent[i]);particles=new ParticleRenderer(sim,conf.shape);particles.setFinish(finishMode);renderers.set(conf.shape,particles);scene.add(particles.object);
  const shapeSelect=document.querySelector('#shape'),paletteSelect=document.querySelector('#palette'),colorSelect=document.querySelector('#color'),nerveToggle=document.querySelector('#nerves');
  shapeSelect.value=conf.shape;paletteSelect.value=String(conf.paletteMode);colorSelect.value=conf.densityOnly?'0':'1';nerveToggle.checked=conf.nerves;
  const solverSelect=document.querySelector('#solver'),shadowSelect=document.querySelector('#shadows');
@@ -232,7 +245,7 @@ async function start(){
  countLabel.textContent=countFormat.format(conf.particles);
  countSlider.oninput=()=>{requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
  shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value,sim.uniforms.screenScaleY.value);updateVisibleBounds();particles.update();};
- paletteSelect.onchange=()=>{sim.uniforms.paletteMode.value=Number(paletteSelect.value);conf.paletteMode=Number(paletteSelect.value);};
+ paletteSelect.onchange=()=>{conf.paletteMode=Number(paletteSelect.value);if(conf.paletteMode>=0)changeStudy(conf.paletteMode);else {changeStudy(selectStudy(state,metrics,studyRecent));nextStudy=age+rand(28,65);}};
  colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
  nerveToggle.onchange=()=>{conf.nerves=nerveToggle.checked;sim.uniforms.nervesEnabled.value=conf.nerves?1:0;};
  document.querySelector('#learn').checked=conf.learn;
@@ -258,8 +271,9 @@ async function start(){
  document.querySelector('#pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'resume':'pause';if(paused)stop();else schedule();};
  document.querySelector('#new').onclick=()=>location.reload();
  document.querySelector('#full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{}};
- document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
- if(params.has('clean')||conf.studio)document.body.classList.add('clean');
+ document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h'&&!/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))document.body.classList.toggle('lab');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
+ if(params.has('clean'))document.body.classList.add('clean');
+ if(params.has('lab'))document.body.classList.add('lab');
  if(conf.studio){
    document.body.classList.add('studio');
    if('IntersectionObserver' in window){const observer=new IntersectionObserver(entries=>{viewportVisible=entries[0].isIntersecting;if(!viewportVisible)stop();else schedule();},{threshold:0});observer.observe(stage);}
@@ -268,7 +282,8 @@ async function start(){
  window.matterPause=()=>{paused=true;stop();};
  window.matterResume=()=>{paused=false;schedule();};
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
+ document.querySelector('#labToggle').onclick=()=>document.body.classList.toggle('lab');
+ window.sculptureStatus=()=>({palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }
 start().catch(fail);

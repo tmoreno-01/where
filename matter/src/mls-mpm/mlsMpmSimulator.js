@@ -129,6 +129,9 @@ class mlsMpmSimulator {
         this.uniforms.speedRef = uniform(1.8);
         this.uniforms.colorMix = uniform(conf.densityOnly?0.0:1.0);
         this.uniforms.paletteMode = uniform(conf.paletteMode);
+        this.uniforms.pigmentStops=Array.from({length:5},()=>uniform(new THREE.Vector3(.1,.2,.3)));
+        this.uniforms.edgeBias=uniform(new THREE.Vector3());
+        this.uniforms.edgeTargets=uniform(new THREE.Vector4(1,1,1,1));
         this.uniforms.pointer = uniform(new THREE.Vector3());
         this.uniforms.pointerPrevious = uniform(new THREE.Vector3());
         this.uniforms.pointerDrag = uniform(0.0);
@@ -430,7 +433,7 @@ class mlsMpmSimulator {
             // Broad screen-space expansion; keep depth coherent while permitting brief compression.
             const restoring = center.mul(vec3(this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.009).sub(0.005)));
             const boundaryDistance=particlePosition.sub(this.uniforms.visibleMin).min(this.uniforms.visibleMax.sub(particlePosition));
-            const spreadFade=boundaryDistance.div(5).clamp(0,1);
+            const spreadFade=boundaryDistance.div(1.8).clamp(0,1);
             const spreadPush=particlePosition.sub(this.uniforms.spreadCenter).mul(this.uniforms.spreadForce).clamp(-0.56,0.56).mul(spreadFade);
             const pulseR = particlePosition.sub(this.uniforms.pulseCenter);
             const impulse = pulseR.div(pulseR.length().max(2.0)).mul(this.uniforms.pulse).div(float(1).add(pulseR.dot(pulseR).div(380)));
@@ -439,7 +442,7 @@ class mlsMpmSimulator {
             const tideBand = float(1).sub(tideCoord.abs().mul(5.5)).clamp(0,1).pow(2);
             const tideForce = this.uniforms.tideAxis.mul(tideBand).mul(this.uniforms.tideAmount);
             const filament = vec3(center.y.mul(0.14).add(center.z.mul(0.06)).add(time.mul(0.36)).sin(),center.z.mul(0.18).sub(center.x.mul(0.12)).sub(time.mul(0.24)).sin(),center.x.mul(0.12).add(center.y.mul(0.15)).add(time.mul(0.28)).sin()).mul(0.17);
-            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(spreadPush).add(this.uniforms.drift).mul(this.uniforms.dt));
+            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(spreadPush).add(this.uniforms.drift).add(this.uniforms.edgeBias).mul(this.uniforms.dt));
 
             const cellIndex =  ivec3(particlePosition).sub(1).toConst("cellIndex");
             const cellDiff = particlePosition.fract().sub(0.5).toConst("cellDiff");
@@ -533,14 +536,14 @@ class mlsMpmSimulator {
             const rareForce=select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
             // A broad soft collision layer prevents planar accumulation.
-            const margin=vec3(5.0,5.0,4.0);
+            const margin=vec3(1.7,1.7,4.0);
             const edgeLow=this.uniforms.visibleMin.add(margin).sub(particlePosition).div(margin).clamp(0,1);
             const edgeHigh=particlePosition.sub(this.uniforms.visibleMax.sub(margin)).div(margin).clamp(0,1);
             const edgeNormal=edgeLow.mul(edgeLow).sub(edgeHigh.mul(edgeHigh));
-            particleVelocity.addAssign(edgeNormal.mul(2.8).mul(this.uniforms.dt));
+            particleVelocity.addAssign(edgeNormal.mul(1.9).mul(this.uniforms.dt));
             const outwardLow=particleVelocity.min(0).mul(edgeLow.mul(edgeLow));
             const outwardHigh=particleVelocity.max(0).mul(edgeHigh.mul(edgeHigh));
-            particleVelocity.subAssign(outwardLow.add(outwardHigh).mul(.34));
+            particleVelocity.subAssign(outwardLow.add(outwardHigh).mul(.15));
             const boundaryCurl=vec3(edgeNormal.y.mul(particlePosition.z.mul(.16).add(time.mul(.12)).sin()),edgeNormal.x.mul(particlePosition.z.mul(.18).sub(time.mul(.13)).cos()),edgeNormal.x.add(edgeNormal.y).mul(particlePosition.y.mul(.12).sin())).mul(.31);
             particleVelocity.addAssign(boundaryCurl.mul(this.uniforms.dt));
             // Recent disturbance slightly changes local mobility; slowly relaxes back.
@@ -593,28 +596,17 @@ class mlsMpmSimulator {
             const energy = speed.mul(0.86).add(den.div(den.add(1)).mul(0.12)).add(accel.mul(0.07)).add(heading.mul(0.035));
             const densitySignal = den.div(den.add(0.50));
             const t = mix(densitySignal,energy,this.uniforms.colorMix).add(this.uniforms.palette.mul(0.028)).clamp(0,1);
-            // These are bounded linear-light pigment values, not emissive whites.
-            const violet = vec3(0.12,0.012,0.35);
-            const blue = vec3(0.018,0.085,0.72);
-            const aqua = vec3(0.006,0.44,0.56);
-            const acid = vec3(0.48,0.67,0.018);
-            const orange = vec3(0.82,0.125,0.012);
-            const fuchsia = vec3(0.68,0.014,0.27);
-            const c0 = mix(violet,blue,t.mul(5.5).clamp(0,1));
-            const c1 = mix(c0,aqua,t.sub(0.18).mul(5.0).clamp(0,1));
-            const c2 = mix(c1,acid,t.sub(0.38).mul(5.0).clamp(0,1));
-            const c3 = mix(c2,orange,t.sub(0.58).mul(5.0).clamp(0,1));
-            const spectrum = mix(c3,fuchsia,t.sub(0.78).mul(4.55).clamp(0,1));
-            const acidA = mix(vec3(0.065,0.008,0.18),vec3(0.015,0.32,0.34),t.mul(2.5).clamp(0,1));
-            const acidB = mix(acidA,vec3(0.50,0.68,0.012),t.sub(0.40).mul(2.9).clamp(0,1));
-            const acidC = mix(acidB,vec3(0.86,0.19,0.025),t.sub(0.79).mul(4.8).clamp(0,1));
-            const emberA = mix(vec3(0.035,0.018,0.24),vec3(0.39,0.015,0.35),t.mul(2.8).clamp(0,1));
-            const emberB = mix(emberA,vec3(0.79,0.045,0.075),t.sub(0.35).mul(3.0).clamp(0,1));
-            const emberC = mix(emberB,vec3(0.85,0.36,0.018),t.sub(0.68).mul(3.13).clamp(0,1));
-            const pigment = mix(mix(spectrum,acidC,select(this.uniforms.paletteMode.equal(1),float(1),float(0))),emberC,select(this.uniforms.paletteMode.equal(2),float(1),float(0)));
-            const afterimage = mix(vec3(0.19,0.035,0.52),vec3(0.72,0.10,0.20),memory);
-            const remembered = mix(pigment,afterimage,memory.mul(0.72).mul(this.uniforms.colorMix));
-            const nerveColor=mix(vec3(0.20,0.035,0.76),vec3(0.78,0.30,0.025),signal);
+            // Five curated linear-light pigments, animated by the autonomous director.
+            const spatial=normalizedPosition.x.mul(.19).add(normalizedPosition.y.mul(.13)).add(normalizedPosition.z.mul(.07));
+            const pigmentT=t.mul(.89).add(spatial).add(memory.mul(.12)).add(.055).clamp(0,1);
+            const stops=this.uniforms.pigmentStops;
+            const a0=mix(stops[0],stops[1],pigmentT.mul(4).clamp(0,1));
+            const a1=mix(a0,stops[2],pigmentT.sub(.25).mul(4).clamp(0,1));
+            const a2=mix(a1,stops[3],pigmentT.sub(.50).mul(4).clamp(0,1));
+            const pigment=mix(a2,stops[4],pigmentT.sub(.75).mul(4).clamp(0,1));
+            const afterimage = mix(stops[1],stops[3],memory);
+            const remembered = mix(pigment,afterimage,memory.mul(0.42).mul(this.uniforms.colorMix));
+            const nerveColor=mix(stops[2],stops[4],signal);
             const activated=mix(remembered,nerveColor,signal.mul(0.72));
             const eclipseTint=mix(activated,vec3(0.12,0.035,0.28),select(kind.equal(2),rare.mul(0.48),float(0)));
             const illuminated = eclipseTint.mul(speed.mul(0.28).add(0.80)).mul(accel.mul(0.13).add(0.94));
@@ -634,7 +626,8 @@ class mlsMpmSimulator {
         await this.renderer.computeAsync(this.kernels.sample);
         const a = new Float32Array(await this.renderer.getArrayBufferAsync(this.telemetry.value));
         const mean = new THREE.Vector3(), size = this.gridSize;
-        let density=0, density2=0, speed=0, speed2=0, edge=0, spread=0, signal=0, n=0; const hist=new Array(64).fill(0);
+        let density=0, density2=0, speed=0, speed2=0, edge=0, spread=0, signal=0, n=0; const hist=new Array(64).fill(0),sides=[0,0,0,0];
+        const lo=this.uniforms.visibleMin.value,hi=this.uniforms.visibleMax.value;
         for(let i=0;i<512;i++){
             const j=i*4,k=(512+i)*4;
             const x=a[j]/size.x,y=a[j+1]/size.y,z=a[j+2]/size.z;
@@ -642,8 +635,10 @@ class mlsMpmSimulator {
             mean.x+=x;mean.y+=y;mean.z+=z;
             const d=a[j+3]/Math.max(conf.restDensity,0.001),s=Math.hypot(a[k],a[k+1],a[k+2]);
             density+=d;density2+=d*d;speed+=s;speed2+=s*s;signal+=a[k+3];
-            const bx=Math.min(7,Math.max(0,Math.floor(x*8))),by=Math.min(7,Math.max(0,Math.floor(y*8)));hist[by*8+bx]++;
-            edge+=Math.min(x,1-x,y,1-y)<0.115?1:0;n++;
+            const xx=(a[j]-lo.x)/Math.max(.001,hi.x-lo.x),yy=(a[j+1]-lo.y)/Math.max(.001,hi.y-lo.y);
+            const bx=Math.min(7,Math.max(0,Math.floor(xx*8))),by=Math.min(7,Math.max(0,Math.floor(yy*8)));hist[by*8+bx]++;
+            if(xx<.085)sides[0]++;if(xx>.915)sides[1]++;if(yy<.085)sides[2]++;if(yy>.915)sides[3]++;
+            edge+=Math.min(xx,1-xx,yy,1-yy)<.085?1:0;n++;
         }
         if(n<480)return null;
         mean.divideScalar(n);
@@ -654,7 +649,7 @@ class mlsMpmSimulator {
         }
         const distribution=hist.map(x=>x/n);
         const entropy=-distribution.reduce((sum,p)=>sum+(p>0?p*Math.log(p):0),0)/Math.log(64);
-        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),spreadX:Math.sqrt(spreadX/n),spreadY:Math.sqrt(spreadY/n),spreadZ:Math.sqrt(spreadZ/n),coverage:hist.filter(x=>x>=3).length/64,densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution};
+        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),spreadX:Math.sqrt(spreadX/n),spreadY:Math.sqrt(spreadY/n),spreadZ:Math.sqrt(spreadZ/n),coverage:hist.filter(x=>x>=3).length/64,sides:sides.map(x=>x/n),densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution};
     }
 
     setMouseRay(origin, direction, pos) {
