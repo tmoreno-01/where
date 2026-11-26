@@ -12,10 +12,11 @@ origins.push(v(.30,.72,.28).multiply(grid),v(.70,.29,.75).multiply(grid));
 goals.push(origins[2].clone(),origins[3].clone());
 const axes=[v(.2,.4,1).normalize(),v(-.4,.6,-1).normalize(),v(.4,1,.3).normalize(),v(-1,.4,.5).normalize()],axisGoals=axes.map(x=>x.clone());
 const pointer=v(),pointerDelta=v(),pointerGoal=v(),clickCenter=v(),pulseCenter=v(),previousPointer=v();
-let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'sculptural',finishMode=params.get('finish')||'glossy';
+let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'contrast',finishMode=params.get('finish')||'metallic';
 let fieldShadowMode=params.get('fieldshadow')||'deep';
-let brightness=1;
-const visibleFraction=.76;
+let brightness=1.15;
+const visibleFraction=.92;
+let hostVisible=true,viewportVisible=true;
 let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=9,speedRef=1.0;
 const tideAxis=v(1,0,0);
 let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
@@ -105,7 +106,7 @@ function direct(dt){
  drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;palette+=(paletteGoal-palette)*a*.38;noise+=(noiseGoal-noise)*a;
  const u=sim.uniforms;u.vortexA.value.copy(origins[0]);u.vortexB.value.copy(origins[1]);u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  const m=metrics,compression=state==='gather'||rareKind===2;
- const targetSpread=compression ? .205 : .275;
+ const targetSpread=compression ? .205 : .265;
  const sx=m?.spreadX??.215,sy=m?.spreadY??.205;
  const fx=clamp(.004+(targetSpread-sx)*.085,-.003,.018),fy=clamp(.005+(targetSpread-sy)*.10,-.003,.020);
  spreadForce.lerp(v(fx,fy,0),1-Math.exp(-dt*.23));
@@ -152,6 +153,16 @@ function direct(dt){
  exposure+=((look.exposure-activity*.035)*brightness-exposure)*(1-Math.exp(-dt*3));renderer.toneMappingExposure=exposure;
 }
 function setShadows(enabled){if(shadowActive===enabled&&renderer.shadowMap.enabled===enabled)return;shadowActive=enabled;renderer.shadowMap.enabled=enabled;lightRig.key.castShadow=enabled;}
+function updateVisibleBounds(){
+ const u=sim.uniforms,halfX=grid.x*visibleFraction*.5,halfY=grid.y*visibleFraction*.5;
+ // Conservative mesh radius in world units, including density and stretched cuboids.
+ const extent=conf.shape==='rods'?1.85:conf.shape==='capsules'?1.19:.61;
+ const pad=extent*conf.actualSize*1.12+.08;
+ const sx=u.screenScale.value,sy=u.screenScaleY.value;
+ const minX=Math.max(2.04,grid.x*.5-halfX+pad/sx),minY=Math.max(2.04,grid.y*.5-halfY+pad/sy);
+ u.visibleMin.value.set(minX,minY,2.04);
+ u.visibleMax.value.set(grid.x-minX,grid.y-minY,grid.z-2.04);
+}
 function resize(){
  if(!renderer||!camera)return;
  const aspect=innerWidth/Math.max(1,innerHeight),hh=61.8/128;
@@ -159,25 +170,25 @@ function resize(){
  const bg=scene?.getObjectByName('studio backdrop');if(bg)bg.scale.set(2*hh*aspect*1.04,2*hh*1.04,1);
  // Keep the physical boundary outside the camera on every aspect ratio.
  const scaleX=2*hh*64*aspect/(conf.gridX*visibleFraction),scaleY=2*hh*64/(conf.gridY*visibleFraction);
- if(particles){particles.setChamberScale(scaleX,scaleY);sim.uniforms.screenScale.value=scaleX;sim.uniforms.screenScaleY.value=scaleY;}
+ if(particles){particles.setChamberScale(scaleX,scaleY);sim.uniforms.screenScale.value=scaleX;sim.uniforms.screenScaleY.value=scaleY;updateVisibleBounds();}
  renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
 }
-function fail(e){console.error(e);dead=true;status.hidden=false;status.textContent='This experiment requires a working WebGPU browser and graphics adapter. '+(e?.message||String(e));}
+function fail(e){console.error(e);dead=true;status.hidden=false;status.textContent=conf.studio?'This live experiment requires WebGPU.':'This experiment requires a working WebGPU browser and graphics adapter. '+(e?.message||String(e));if(conf.studio&&window.parent!==window)window.parent.postMessage({type:'matter:unavailable'},location.origin);}
 function stop(){if(raf)cancelAnimationFrame(raf);raf=0;previous=0;perfStart=0;perfFrames=0;}
-function schedule(){if(!raf&&!running&&!paused&&!dead&&!document.hidden)raf=requestAnimationFrame(loop);}
+function schedule(){if(!raf&&!running&&!paused&&!dead&&!document.hidden&&hostVisible&&viewportVisible)raf=requestAnimationFrame(loop);}
 async function loop(now){
- raf=0;if(paused||dead||document.hidden)return;running=true;
+ raf=0;if(paused||dead||document.hidden||!hostVisible||!viewportVisible)return;running=true;
  const dt=previous?Math.min((now-previous)/1000,.033):1/60;previous=now;age+=dt;
  try{
   if(requestedCount!==conf.particles){
-   conf.particles=requestedCount;conf.updateParams();countRevision++;metrics=null;
+   conf.particles=requestedCount;conf.updateParams();updateVisibleBounds();countRevision++;metrics=null;
    policy.begin(state,null,age);nextSample=age+.5;
    if(shadowMode==='auto'&&conf.particles>=200000)setShadows(false);
   }
   direct(dt);await sim.update(dt,age);particles.update();await renderer.renderAsync(scene,camera);
   // Keep at most one rendered frame queued so input cannot sit behind a backlog of GPU frames.
   if(renderer.backend.device?.queue)await renderer.backend.device.queue.onSubmittedWorkDone();
-  if(frame++===0){status.hidden=true;stage.classList.add('ready');}
+  if(frame++===0){status.hidden=true;stage.classList.add('ready');if(conf.studio&&window.parent!==window)window.parent.postMessage({type:'matter:ready'},location.origin);}
   if(age>=nextSample&&!observing&&!senseError&&frame>3){
    nextSample=age+3.5;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
@@ -188,7 +199,7 @@ async function loop(now){
   if(now-perfStart>2200){
    const fps=perfFrames*1000/(now-perfStart);measuredFps=fps;
    if(fps<42){slowWindows++;fastWindows=0;}else if(fps>56){fastWindows++;slowWindows=0;}else{slowWindows=0;fastWindows=0;}
-   if(slowWindows>=2){if(shadowMode==='auto'&&shadowActive)setShadows(false);else if(ratio>.60){ratio=Math.max(.60,ratio-.10);resize();}slowWindows=0;}
+   if(slowWindows>=2){if(shadowMode==='auto'&&shadowActive)setShadows(false);else if(ratio>.65){ratio=Math.max(.65,ratio-.10);resize();}else if(conf.studio&&fps<34&&requestedCount>(conf.mobile?6000:60000)){requestedCount=Math.max(conf.mobile?6000:60000,Math.round(requestedCount*.82/1000)*1000);document.querySelector('#particleCount').value=String(requestedCount);document.querySelector('#particleCountLabel').textContent=countFormat.format(requestedCount);}slowWindows=0;}
    if(fastWindows>=5&&ratio<renderCeiling){ratio=Math.min(renderCeiling,ratio+.05);resize();fastWindows=0;}
    perfFrames=0;perfStart=now;
   }
@@ -220,17 +231,18 @@ async function start(){
  countSlider.min='5000';countSlider.max=String(conf.maxParticles);countSlider.step='1000';countSlider.value=String(conf.particles);
  countLabel.textContent=countFormat.format(conf.particles);
  countSlider.oninput=()=>{requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
- shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value,sim.uniforms.screenScaleY.value);particles.update();};
+ shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value,sim.uniforms.screenScaleY.value);updateVisibleBounds();particles.update();};
  paletteSelect.onchange=()=>{sim.uniforms.paletteMode.value=Number(paletteSelect.value);conf.paletteMode=Number(paletteSelect.value);};
  colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
  nerveToggle.onchange=()=>{conf.nerves=nerveToggle.checked;sim.uniforms.nervesEnabled.value=conf.nerves?1:0;};
  document.querySelector('#learn').checked=conf.learn;
  document.querySelector('#learn').onchange=e=>{policy.enabled=e.target.checked;};
  const brightnessSlider=document.querySelector('#brightness'),brightnessLabel=document.querySelector('#brightnessLabel');
+ brightnessSlider.value=String(brightness);brightnessLabel.textContent=Math.round(brightness*100)+'%';
  brightnessSlider.oninput=()=>{brightness=Number(brightnessSlider.value);brightnessLabel.textContent=Math.round(brightness*100)+'%';};
- const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='sculptural';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
+ const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='contrast';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
  const fieldSelect=document.querySelector('#fieldShadow');if(!['deep','soft','off'].includes(fieldShadowMode))fieldShadowMode='deep';fieldSelect.value=fieldShadowMode;fieldSelect.onchange=()=>{fieldShadowMode=fieldSelect.value;};
- const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='glossy';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);};
+ const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='metallic';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);};
  document.querySelector('#rare').onclick=()=>rareEvent();
  document.querySelector('#reset').onclick=()=>{policy.reset();policy.begin(state,metrics,age);};
  if(params.has('rare')){const kind=rareNames.indexOf(params.get('rare'));nextRare=Infinity;rareEvent(kind>0?kind:1);}
@@ -247,7 +259,14 @@ async function start(){
  document.querySelector('#new').onclick=()=>location.reload();
  document.querySelector('#full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{}};
  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h')document.body.classList.toggle('clean');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
- if(params.has('clean'))document.body.classList.add('clean');
+ if(params.has('clean')||conf.studio)document.body.classList.add('clean');
+ if(conf.studio){
+   document.body.classList.add('studio');
+   if('IntersectionObserver' in window){const observer=new IntersectionObserver(entries=>{viewportVisible=entries[0].isIntersecting;if(!viewportVisible)stop();else schedule();},{threshold:0});observer.observe(stage);}
+   window.addEventListener('message',e=>{if(e.source!==window.parent||e.origin!==location.origin||e.data?.type!=='matter:visibility')return;hostVisible=e.data.visible===true;if(!hostVisible)stop();else schedule();});
+ }
+ window.matterPause=()=>{paused=true;stop();};
+ window.matterResume=()=>{paused=false;schedule();};
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
  window.sculptureStatus=()=>({frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();

@@ -152,6 +152,8 @@ class mlsMpmSimulator {
         this.uniforms.drift = uniform(new THREE.Vector3());
         this.uniforms.screenScale = uniform(1.0);
         this.uniforms.screenScaleY=uniform(1.0);
+        this.uniforms.visibleMin=uniform(new THREE.Vector3(2.04,2.04,2.04));
+        this.uniforms.visibleMax=uniform(this.gridSize.clone().subScalar(2.04));
         this.uniforms.sampleStride = uniform(1,'uint');
         this.telemetry = instancedArray(1024,'vec4').label('telemetry');
 
@@ -427,8 +429,8 @@ class mlsMpmSimulator {
             const center = particlePosition.sub(vec3(this.uniforms.gridSize).mul(0.5));
             // Broad screen-space expansion; keep depth coherent while permitting brief compression.
             const restoring = center.mul(vec3(this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.009).sub(0.005)));
-            const boundaryDistance=particlePosition.min(vec3(this.uniforms.gridSize).sub(particlePosition));
-            const spreadFade=boundaryDistance.sub(3).div(7).clamp(0,1);
+            const boundaryDistance=particlePosition.sub(this.uniforms.visibleMin).min(this.uniforms.visibleMax.sub(particlePosition));
+            const spreadFade=boundaryDistance.div(5).clamp(0,1);
             const spreadPush=particlePosition.sub(this.uniforms.spreadCenter).mul(this.uniforms.spreadForce).clamp(-0.56,0.56).mul(spreadFade);
             const pulseR = particlePosition.sub(this.uniforms.pulseCenter);
             const impulse = pulseR.div(pulseR.length().max(2.0)).mul(this.uniforms.pulse).div(float(1).add(pulseR.dot(pulseR).div(380)));
@@ -531,9 +533,9 @@ class mlsMpmSimulator {
             const rareForce=select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
             // A broad soft collision layer prevents planar accumulation.
-            const margin=vec3(8,8,6);
-            const edgeLow=margin.sub(particlePosition).div(margin.sub(2)).clamp(0,1);
-            const edgeHigh=particlePosition.sub(vec3(this.uniforms.gridSize).sub(margin)).div(margin.sub(2)).clamp(0,1);
+            const margin=vec3(5.0,5.0,4.0);
+            const edgeLow=this.uniforms.visibleMin.add(margin).sub(particlePosition).div(margin).clamp(0,1);
+            const edgeHigh=particlePosition.sub(this.uniforms.visibleMax.sub(margin)).div(margin).clamp(0,1);
             const edgeNormal=edgeLow.mul(edgeLow).sub(edgeHigh.mul(edgeHigh));
             particleVelocity.addAssign(edgeNormal.mul(2.8).mul(this.uniforms.dt));
             const outwardLow=particleVelocity.min(0).mul(edgeLow.mul(edgeLow));
@@ -549,7 +551,7 @@ class mlsMpmSimulator {
             this.particleBuffer.element(instanceIndex).get('C').assign(B.mul(4));
             particlePosition.addAssign(particleVelocity.mul(this.uniforms.dt).add(directOffset));
             // Reflect overshoot instead of projecting multiple particles onto one plane.
-            const wallMin=vec3(2.04),wallMax=vec3(this.uniforms.gridSize).sub(2.04);
+            const wallMin=this.uniforms.visibleMin,wallMax=this.uniforms.visibleMax;
             const lo=wallMin.sub(particlePosition).max(0).toConst('wallLo');
             const hi=particlePosition.sub(wallMax).max(0).toConst('wallHi');
             particlePosition.addAssign(lo.sub(hi).mul(1.65));
