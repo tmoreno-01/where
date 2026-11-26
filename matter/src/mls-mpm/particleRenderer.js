@@ -213,6 +213,7 @@ class ParticleRenderer {
         const vMemory=varying(float(0),"vMatterMemory");
         const vEnergy=varying(float(0),"vMatterEnergy");
         const vSignal=varying(float(0),"vMatterSignal");
+        const vAgency=varying(vec3(.34,.33,.33),'vAgency');
 
         const particle = this.mlsMpmSim.particleBuffer.element(instanceIndex);
         this.material.positionNode = Fn(() => {
@@ -225,6 +226,8 @@ class ParticleRenderer {
             const mat = spheres ? null : calcLookAtMatrix(particleDirection.xyz);
             const remembered=particle.get('memory').clamp(0,1);
             const signalValue=particle.get('signal');
+            const mind=particle.get('brain');
+            vAgency.assign(mind.xyz);
             const stretch=particle.get('velocity').length().mul(.28).clamp(0,1).mul(.55).add(.82).add(remembered.mul(.72));
             const localNormal=spheres||capsules?normalLocal:normalLocal.mul(vec3(1,1,float(1).div(stretch)));
             vNormal.assign(transformNormalToView(spheres?localNormal:mat.mul(localNormal)));
@@ -245,8 +248,8 @@ class ParticleRenderer {
             const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).add(remembered.mul(.12)).clamp(0.72,1.18);
             if(spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
             if(spicules){
-                const growth=remembered.mul(.48).add(signalValue.mul(.22));
-                const organicLocal=vec3(local.x.add(local.z.mul(local.z).mul(growth)),local.y.add(local.z.mul(growth).mul(.42)),local.z.mul(stretch));
+                const growth=remembered.mul(.30).add(signalValue.mul(.14)).add(mind.y.mul(.42));
+                const organicLocal=vec3(local.x.add(local.z.mul(local.z).mul(growth)),local.y.add(local.z.mul(growth).mul(.42)),local.z.mul(stretch.mul(mind.x.mul(.22).sub(mind.z.mul(.18)).add(.95))));
                 return mat.mul(organicLocal.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
             }
             if(capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
@@ -259,7 +262,7 @@ class ParticleRenderer {
         const p1=mix(p0,stops[2],t.sub(.25).mul(4).clamp(0,1));
         const p2=mix(p1,stops[3],t.sub(.50).mul(4).clamp(0,1));
         const p3=mix(p2,stops[4],t.sub(.75).mul(4).clamp(0,1));
-        const livePigment=mix(p3,stops[4],vSignal.mul(.13)).clamp(0,1);
+        const livePigment=mix(mix(p3,stops[4],vSignal.mul(.13).add(vAgency.y.mul(.09))),stops[1],vAgency.z.mul(.13)).clamp(0,1);
         const imprintTone=vMemory.sub(.08).div(.52).clamp(0,1).pow(1.4);
         const imprintPigment=mix(stops[0],stops[4],vMemory.mul(.82).add(.08));
         const vPigment=mix(livePigment,imprintPigment,imprintTone.mul(.58)).clamp(0,1).toVar('unsettledPigment');

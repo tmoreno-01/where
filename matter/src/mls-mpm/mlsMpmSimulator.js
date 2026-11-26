@@ -57,6 +57,9 @@ class mlsMpmSimulator {
             signal: { type: 'float' },
             refractory: { type: 'float' },
             illumination: { type: 'float' },
+            brain: { type: 'vec4' },
+            adaptation: { type: 'vec4' },
+            traits: { type: 'vec4' },
         };
         this.particleBuffer = new StructuredArray(particleStruct, maxParticles, "particleData");
 
@@ -73,6 +76,10 @@ class mlsMpmSimulator {
             this.particleBuffer.set(i, "mass", mass);
             this.particleBuffer.set(i, "direction", [0,1,0]);
             this.particleBuffer.set(i, "illumination", 1);
+            // Different initial appetites, preferred density and steering axes.
+            this.particleBuffer.set(i,"traits",[Math.random(),Math.random(),Math.random(),Math.random()]);
+            this.particleBuffer.set(i,"brain",[.34,.33,.33,.55+Math.random()*.4]);
+            this.particleBuffer.set(i,"adaptation",[0,0,0,.65]);
         }
 
         const cellCount = this.gridSize.x * this.gridSize.y * this.gridSize.z;
@@ -143,6 +150,8 @@ class mlsMpmSimulator {
         this.uniforms.pointerActive = uniform(0.0);
         this.uniforms.pointerPulse = uniform(0.0);
         this.uniforms.memoryEnabled = uniform(conf.memory?1.0:0.0);
+        this.uniforms.brainEnabled=uniform(1.0);
+        this.uniforms.brainLearning=uniform(conf.learn?1.0:0.0);
         this.uniforms.nervesEnabled = uniform(conf.nerves?1.0:0.0);
         this.uniforms.fastPressure = uniform(conf.solver==='fast'?1.0:0.0);
         this.uniforms.nerveSource = uniform(new THREE.Vector3());
@@ -162,7 +171,7 @@ class mlsMpmSimulator {
         this.uniforms.visibleMax=uniform(this.gridSize.clone().subScalar(2.04));
         this.uniforms.sampleStride = uniform(1,'uint');
         this.uniforms.sampleOffset=uniform(0,'uint');
-        this.telemetry = instancedArray(1024,'vec4').label('telemetry');
+        this.telemetry = instancedArray(1536,'vec4').label('telemetry');
 
         this.kernels.clearGrid = Fn(() => {
             this.cellBuffer.setAtomic("x", false);
@@ -561,6 +570,48 @@ class mlsMpmSimulator {
             const molt=rareDir.mul(.78).add(echoTangent.mul(1.45)).mul(oldMemory.mul(.72).add(.18)).mul(rareWeight);
             const rareForce=select(kind.equal(5),molt,select(kind.equal(4),echo,select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
+            // Per-particle recurrent controller. Three competing activation channels
+            // are continuously integrated; experience modifies their individual biases.
+            const agent=this.particleBuffer.element(instanceIndex);
+            const brain=agent.get('brain').toConst('oldBrain');
+            const learned=agent.get('adaptation').toConst('oldAdaptation');
+            const traits=agent.get('traits').toConst('agentTraits');
+            const step=this.uniforms.dt;
+            const localDensity=particleDensity.div(this.uniforms.restDensity.max(.001)).clamp(0,3);
+            const preferred=traits.x.mul(.85).add(.65);
+            const crowded=localDensity.sub(preferred).clamp(0,1);
+            const sparse=preferred.sub(localDensity).clamp(0,1);
+            const fatigue=float(1).sub(brain.w);
+            const social=incoming.mul(.6).add(signal.mul(.4)).clamp(0,1);
+            const contactSense=contactSignal.clamp(0,1);
+            const utility=float(1).sub(localDensity.sub(preferred).abs().mul(.38)).sub(prevVelocity.length().sub(1.5).max(0).mul(.09)).sub(contactSense.mul(.12)).clamp(0,1);
+            const reward=utility.sub(learned.w).clamp(-.35,.35);
+            const eligibility=brain.xyz.sub(vec3(.333333));
+            const newBias=learned.xyz.add(eligibility.mul(reward).mul(step).mul(.8).mul(this.uniforms.brainLearning)).clamp(-.45,.45);
+            const baseline=mix(learned.w,utility,step.mul(.40).clamp(0,1));
+            const scores=vec3(
+                sparse.mul(.85).add(brain.x.mul(.40)).sub(brain.z.mul(.18)).add(traits.y.mul(.32)).sub(fatigue.mul(.38)),
+                social.mul(.65).add(crowded.mul(.44)).add(brain.y.mul(.38)).sub(brain.x.mul(.12)).add(traits.z.mul(.32)),
+                fatigue.mul(1.25).add(crowded.mul(.38)).add(contactSense.mul(.55)).add(brain.z.mul(.42)).sub(brain.y.mul(.16))
+            ).add(newBias).add(.24).max(.035);
+            const desire=scores.mul(scores);
+            const targetDrive=desire.div(desire.x.add(desire.y).add(desire.z).max(.001));
+            const drives=mix(brain.xyz,targetDrive,step.mul(1.65).clamp(0,1)).toConst('agentDrives');
+            const energy=brain.w.add(step.mul(drives.z.mul(.105).add(.018).sub(drives.x.mul(.048)).sub(drives.y.mul(.065)).sub(contactSense.mul(.09)))).clamp(.14,1);
+            agent.get('brain').assign(vec4(drives,energy));
+            agent.get('adaptation').assign(vec4(newBias,baseline));
+            // Seek: move towards less crowded tiles when compressed, or towards
+            // nearby material when isolated. Circulate: turn around a personal axis.
+            // Recover: damp local movement, then regain the ability to seek.
+            const personalAxis=vec3(traits.y.sub(.5),traits.z.sub(.5),traits.w.sub(.5)).add(vec3(.013,.019,.027));
+            const axisUnit=personalAxis.div(personalAxis.length().max(.02));
+            const headingVec=prevVelocity.div(prevVelocity.length().max(.4));
+            const swirlAxis=cross(axisUnit,headingVec.add(balanceForce.mul(.55)));
+            const seekForce=balanceForce.mul(crowded.mul(.9).sub(sparse.mul(.38))).add(axisUnit.mul(sparse.mul(.22).add(.05)));
+            const circulateForce=swirlAxis.mul(.65).add(balanceForce.mul(.19)).add(axisUnit.mul(social.mul(.16)));
+            const recoverForce=prevVelocity.mul(-.32).add(balanceForce.mul(crowded.mul(.35)));
+            const agency=seekForce.mul(drives.x).add(circulateForce.mul(drives.y)).add(recoverForce.mul(drives.z)).mul(energy.mul(.65).add(.35)).clamp(-.7,.7);
+            particleVelocity.addAssign(agency.mul(step).mul(this.uniforms.brainEnabled).mul(1.65));
             // A broad soft collision layer prevents planar accumulation.
             const margin=vec3(3.0,3.0,4.0);
             const edgeLow=this.uniforms.visibleMin.add(margin).sub(particlePosition).div(margin).clamp(0,1);
@@ -625,6 +676,7 @@ class mlsMpmSimulator {
             const p = this.particleBuffer.element(i);
             this.telemetry.element(instanceIndex).assign(vec4(p.get('position'),p.get('density')));
             this.telemetry.element(instanceIndex.add(uint(512))).assign(vec4(p.get('velocity'),p.get('signal')));
+            this.telemetry.element(instanceIndex.add(uint(1024))).assign(p.get('brain'));
         })().compute(512);
     }
 
@@ -633,7 +685,8 @@ class mlsMpmSimulator {
         await this.renderer.computeAsync(this.kernels.sample);
         const a = new Float32Array(await this.renderer.getArrayBufferAsync(this.telemetry.value));
         const mean = new THREE.Vector3(), size = this.gridSize;
-        let density=0, density2=0, speed=0, speed2=0, edge=0, spread=0, signal=0, n=0; const hist=new Array(64).fill(0),sides=[0,0,0,0],regions=Array.from({length:64},()=>({speed:0,signal:0,vx:0,vy:0}));
+        let density=0, density2=0, speed=0, speed2=0, edge=0, spread=0, signal=0, n=0;
+        const drives=[0,0,0],dominant=[0,0,0];let energy=0,brainSamples=0; const hist=new Array(64).fill(0),sides=[0,0,0,0],regions=Array.from({length:64},()=>({speed:0,signal:0,vx:0,vy:0}));
         const lo=this.uniforms.visibleMin.value,hi=this.uniforms.visibleMax.value;
         for(let i=0;i<512;i++){
             const j=i*4,k=(512+i)*4;
@@ -642,6 +695,8 @@ class mlsMpmSimulator {
             mean.x+=x;mean.y+=y;mean.z+=z;
             const d=a[j+3]/Math.max(conf.restDensity,0.001),s=Math.hypot(a[k],a[k+1],a[k+2]);
             density+=d;density2+=d*d;speed+=s;speed2+=s*s;signal+=a[k+3];
+            const b=(1024+i)*4,drive=[a[b],a[b+1],a[b+2]];
+            if(drive.every(Number.isFinite)&&Number.isFinite(a[b+3])){for(let q=0;q<3;q++)drives[q]+=drive[q];dominant[drive.indexOf(Math.max(...drive))]++;energy+=a[b+3];brainSamples++;}
             const xx=(a[j]-lo.x)/Math.max(.001,hi.x-lo.x),yy=(a[j+1]-lo.y)/Math.max(.001,hi.y-lo.y);
             const bx=Math.min(7,Math.max(0,Math.floor(xx*8))),by=Math.min(7,Math.max(0,Math.floor(yy*8)));const tileIndex=by*8+bx;hist[tileIndex]++;const region=regions[tileIndex];region.speed+=s;region.signal+=a[k+3];region.vx+=a[k];region.vy+=a[k+1];
             if(xx<.085)sides[0]++;if(xx>.915)sides[1]++;if(yy<.085)sides[2]++;if(yy>.915)sides[3]++;
@@ -657,7 +712,7 @@ class mlsMpmSimulator {
         for(let i=0;i<64;i++){const count=Math.max(1,hist[i]);for(const k of ['speed','signal','vx','vy'])regions[i][k]/=count;}
         const distribution=hist.map(x=>x/n);
         const entropy=-distribution.reduce((sum,p)=>sum+(p>0?p*Math.log(p):0),0)/Math.log(64);
-        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),spreadX:Math.sqrt(spreadX/n),spreadY:Math.sqrt(spreadY/n),spreadZ:Math.sqrt(spreadZ/n),coverage:hist.filter(x=>x>=3).length/64,sides:sides.map(x=>x/n),densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution,regions};
+        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),spreadX:Math.sqrt(spreadX/n),spreadY:Math.sqrt(spreadY/n),spreadZ:Math.sqrt(spreadZ/n),coverage:hist.filter(x=>x>=3).length/64,sides:sides.map(x=>x/n),densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution,regions,brain:{samples:brainSamples,drives:drives.map(x=>x/Math.max(1,brainSamples)),dominant:dominant.map(x=>x/Math.max(1,brainSamples)),energy:energy/Math.max(1,brainSamples)}};
     }
 
     setMouseRay(origin, direction, pos) {

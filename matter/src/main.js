@@ -155,7 +155,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#regionalReadout').textContent=String(organism.learned);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';const organismState=organism.snapshot();document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'memory '+Math.round(organismState.imprint*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#regionalReadout').textContent=String(organism.learned);const b=metrics?.brain;document.querySelector('#brainReadout').textContent=b?.samples?b.dominant.map(x=>Math.round(x*100)+'%').join(' / ')+' · energy '+Math.round(b.energy*100)+'%':'—';document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';const organismState=organism.snapshot();document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'memory '+Math.round(organismState.imprint*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.sculptural,la=1-Math.exp(-dt*4);
@@ -176,7 +176,7 @@ function setShadows(enabled){if(shadowActive===enabled&&renderer.shadowMap.enabl
 function updateVisibleBounds(){
  const u=sim.uniforms,halfX=grid.x*visibleFraction*.5,halfY=grid.y*visibleFraction*.5;
  // Conservative mesh radius in world units, including density and stretched cuboids.
- const extent=conf.shape==='rods'?1.77:conf.shape==='capsules'?1.19:.61;
+ const extent=conf.shape==='spicules'?2.8:conf.shape==='rods'?1.77:conf.shape==='capsules'?1.19:.61;
  const pad=extent*conf.actualSize*1.12+.005;
  const sx=u.screenScale.value,sy=u.screenScaleY.value;
  const minX=Math.max(2.04,grid.x*.5-halfX+pad/sx),minY=Math.max(2.04,grid.y*.5-halfY+pad/sy);
@@ -259,7 +259,8 @@ async function start(){
  colorSelect.onchange=()=>{colorRule=Number(colorSelect.value);for(const p of renderers.values())p.setColorRule(colorRule);refreshStill();};
  nerveToggle.onchange=()=>{conf.nerves=nerveToggle.checked;sim.uniforms.nervesEnabled.value=conf.nerves?1:0;};
  document.querySelector('#learn').checked=conf.learn;
- document.querySelector('#learn').onchange=e=>{policy.enabled=e.target.checked;};
+ document.querySelector('#learn').onchange=e=>{policy.enabled=e.target.checked;sim.uniforms.brainLearning.value=e.target.checked?1:0;};
+ document.querySelector('#agency').onchange=e=>{sim.uniforms.brainEnabled.value=e.target.checked?1:0;};
  const brightnessSlider=document.querySelector('#brightness'),brightnessLabel=document.querySelector('#brightnessLabel');
  brightnessSlider.value=String(brightness);brightnessLabel.textContent=Math.round(brightness*100)+'%';
  brightnessSlider.oninput=()=>{brightness=Number(brightnessSlider.value);brightnessLabel.textContent=Math.round(brightness*100)+'%';};
@@ -300,7 +301,7 @@ async function start(){
  labToggle.onclick=e=>{const show=document.body.classList.toggle('lab');e.currentTarget.setAttribute('aria-expanded',String(show));if(show){aboutPanel.hidden=true;aboutToggle.setAttribute('aria-expanded','false');}};
  const setAbout=show=>{aboutPanel.hidden=!show;aboutToggle.setAttribute('aria-expanded',String(show));if(show){document.body.classList.remove('lab');labToggle.setAttribute('aria-expanded','false');}};
  aboutToggle.onclick=()=>setAbout(aboutPanel.hidden);document.querySelector('#aboutClose').onclick=()=>setAbout(false);
- window.sculptureStatus=()=>({title:'Ravelith',palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
+ window.sculptureStatus=()=>({title:'No One in Charge',agency:sim.uniforms.brainEnabled.value===1,palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }
 start().catch(fail);

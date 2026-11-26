@@ -1,4 +1,4 @@
-# Ravelith — studio integration / RC 07
+# No One in Charge — studio integration / RC 09
 
 A continuously evolving, browser-native synthetic ecology. Branching spicule units are instanced on the visitor's GPU; regional memory steers their morphogenesis and periodic molts scatter material into new forms. No remote simulation, paid APIs or video streams.
 
@@ -14,8 +14,8 @@ Use a same-origin iframe inside an explicitly sized, overflow-hidden experiment 
 
 Example:
 ```html
-<section class="matter-panel" aria-label="Ravelith — living material experiment">
-  <iframe id="matter" title="Ravelith — live particle sculpture"
+<section class="matter-panel" aria-label="No One in Charge — living material experiment">
+  <iframe id="matter" title="No One in Charge — live particle sculpture"
     src="/matter/?studio=1" loading="lazy" allow="fullscreen"></iframe>
 </section>
 <style>
@@ -47,7 +47,7 @@ On single-page navigation remove the iframe when leaving the experiment. Use sam
 - Capture a poster only after the visual result is approved. Do not publish the release to the main studio site until these checks pass.
 - Keep the included software license and notices. Global and regional learning are bounded contextual reward heuristics, not a neural model or biological life. Regional state is session-local. Field shadows and fast pressure are approximations. No server-side learning.
 
-The public title is Ravelith. The existing `/matter/` route is retained to avoid breaking test links. Palette changes are renderer uniforms, independent of simulation updates, and no automatic palette switching is present. The default is Fossil; density remains the default colour rule. The default geometry is a tapered, asymmetric, four-branch spicule with memory-responsive deformation and an organic-shell material finish. The footer is outside the artwork viewport.
+The public title is No One in Charge. The existing `/matter/` route is retained to avoid breaking test links. Palette changes are renderer uniforms, independent of simulation updates, and no automatic palette switching is present. The default is Fossil; density remains the default colour rule. The default geometry is a tapered, asymmetric, four-branch spicule with memory-responsive deformation and an organic-shell material finish. The footer is outside the artwork viewport.
 
 
 ## About copy and adaptive movement
@@ -56,6 +56,9 @@ The regional controller updates on fresh telemetry approximately every 1.2 secon
 
 
 ## USP: an anatomy without a species
-Ravelith is a synthetic ecology, not a simulation of a named organism. Each GPU particle is rendered as a tapered, asymmetric, branching spicule. Particle memory affects branch deformation, scale, pigment and surface roughness. The 64-region controller retains directional traces; differences between neighbouring traces feed back into the three-dimensional movement field.
+No One in Charge is a synthetic ecology, not a simulation of a named organism. Each GPU particle is rendered as a tapered, asymmetric, branching spicule. Particle memory affects branch deformation, scale, pigment and surface roughness. The 64-region controller retains directional traces; differences between neighbouring traces feed back into the three-dimensional movement field.
 A fifth rare event, "molt", sends memory-bearing particles into a temporary outward spiral. This sheds a local arrangement and seeds a new one. The manual "Trigger a molt" control invokes this event. The system remains a real-time GPU simulation with bounded regional feedback, not a neural network or biological consciousness.
 Mesh shadows are enabled by default on desktop and mobile. Mobile uses a reduced shadow-map resolution; the performance governor may reduce render resolution and, only under sustained severe load, downgrade shadows to automatic mode.
+
+## Individual agency
+Each particle stores a four-float recurrent state (three normalized drives plus energy), four learned state values (three action biases plus recent utility), and four stable individual traits. GPU updates sense density, incoming signals, contact, velocity and fatigue; action preferences persist and adapt from local utility changes. The resulting steering modifies the existing shared material solver. This is a compact recurrent adaptive controller, not a trained general-purpose neural model or biological life. Lab permits independent steering ablation and freezes adaptive bias updates when Learning is disabled. Sample telemetry reports the dominant drive proportions and mean energy from 512 particles. The regional controller and global force director remain active. All state is session-local.
