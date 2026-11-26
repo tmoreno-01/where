@@ -21,16 +21,16 @@ export class Organism {
    const densityChange=density-c.p,speedChange=speed-c.s;
    const crowd=clamp((density-1.04)*.62),quiet=clamp((.52-speed)*.55);
    const excitation=clamp(Math.abs(densityChange)*.30+Math.abs(speedChange)*.13+clamp(r.signal)*.43+crowd*.22+quiet*.12);
-   c.signal=clamp(c.signal*Math.exp(-dt*.58)+excitation*.36+near*.43);
-   c.stress=clamp(c.stress*Math.exp(-dt*.24)+crowd*.24+quiet*.12+c.signal*.13);
-   c.energy=clamp(c.energy+dt*(.064*(.78-c.energy)-.009*speed-.030*c.signal+.016*(1-c.stress)),.12,1);
-   c.memory=clamp(c.memory*Math.exp(-dt*.055)+excitation*.22);
+   c.signal=clamp(c.signal*Math.exp(-dt*.82)+excitation*.22+near*.16);
+   c.stress=clamp(c.stress*Math.exp(-dt*.38)+crowd*.16+quiet*.08+c.signal*.08);
+   c.energy=clamp(c.energy+dt*(.09*(.82-c.energy)-.008*speed-.018*c.signal-.012*c.stress),.24,1);
+   c.memory=clamp(c.memory*Math.exp(-dt*.055)+excitation*.16+c.signal*.04);
    c.p+=(density-c.p)*.48;c.s+=(speed-c.s)*.48;
    c.phase+=dt*(.14+.19*c.energy+.15*c.signal+.045*speed+phaseLock*.045);
    const context=c.p>1.62||c.stress>.72?0:c.p<.56||c.s<.46?1:2;
    if(c.action<0||age>=c.deadline){
     if(learn&&!disturbed&&c.action>=0&&c.p>.12){
-     const a=c.action,k=c.ctx,n=++c.n[k][a],result=quality(c.p,c.s,c.signal);
+     const a=c.action,k=c.ctx,n=++c.n[k][a],result=clamp(.5+(quality(c.p,c.s,c.signal)-c.base)*1.8);
      c.q[k][a]+=(result-c.q[k][a])*Math.max(.10,1/n);this.learned++;
     }
     // 0 restore / 1 clockwise / 2 counter-clockwise / 3 relay
@@ -47,9 +47,9 @@ export class Organism {
    const gx=clamp(left.p-right.p,-1.5,1.5),gy=clamp(down.p-up.p,-1.5,1.5);
    const spin=c.action===1?1:c.action===2?-1:0,restore=c.action===0?1:0,relay=c.action===3?1:0;
    const activity=(.42+.58*c.energy)*(.72+.28*Math.sin(c.phase));
-   const wavePhase=c.phase+x*.57-y*.39+this.clock*.17;
+   const wavePhase=c.phase+x*.57-y*.39+this.clock*.17+c.memory*.42;
    const wave=Math.sin(wavePhase),crossWave=Math.cos(wavePhase*.83+y*.17);
-   const signalDrive=(c.signal*.12+near*.10)*activity;
+   const signalDrive=(c.signal*.12+near*.10+c.memory*.045)*activity;
    const exchange=.12+relay*.23+c.signal*.065;
    const rotation=.19*spin*(.65+.35*c.energy);
    const phaseLock=neighbours[i].reduce((a,j)=>a+Math.sin(phases[j]-c.phase),0)/neighbours[i].length;
