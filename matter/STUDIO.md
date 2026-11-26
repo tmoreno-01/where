@@ -1,10 +1,10 @@
-# Matter — studio integration / RC 04
+# Matter — studio integration / RC 05
 
 A continuously evolving, browser-native metallic particle sculpture. The simulation runs on the visitor's GPU. No remote simulation, paid APIs or video streams.
 
 ## Entry points
-- Testing: `/matter/` (minimal creative controls including particle count; add `?lab=1` for all technical controls; 300,000 default desktop particles; up to 750,000).
-- Presentation: `/matter/?studio=1` (minimal creative controls, evolving curated colour studies driven by local density, metallic capsules, Contrast lighting, 115% brightness, fast solver, deep field shadows; 200,000 desktop / 12,000 mobile starting particles).
+- Testing: `/matter/` (minimal creative controls including particle count; add `?lab=1` for all technical controls; 300,000 default desktop particles; up to 300,000).
+- Presentation: `/matter/?studio=1` (minimal creative controls, evolving curated colour studies driven by local density, metallic cuboids, Contrast lighting, 115% brightness, fast solver, deep field shadows; 200,000 desktop / 12,000 mobile starting particles).
 - Press H to toggle the lab controls; add `&clean=1` to hide all controls; Space pauses/resumes.
 
 ## Integration
@@ -39,10 +39,10 @@ window.addEventListener('message',event=>{
 On single-page navigation remove the iframe when leaving the experiment. Use same-origin messages only. Set a static poster rather than initializing WebGPU if the visitor requests reduced motion; offer an explicit Play button. If the site uses CSP, permit the pinned module CDN or self-host the dependencies.
 
 ## Release settings and verification
-- Keep immediate restrained click ripples, gentle drag, continuously drifting force fields, folding and breathing modes, autonomous formation selection, particle memory, local learning (composition reward favours occupied interior tiles and penalises edge accumulation), evolving colour studies, signal propagation and irregular rare events.
+- Keep immediate restrained click ripples, gentle drag, continuously drifting force fields, folding and breathing modes, autonomous formation selection, 64 independently adapting regions with local density, speed, signal and action-outcome feedback, particle memory, local learning (composition reward favours occupied interior tiles and penalises edge accumulation), evolving colour studies, signal propagation and irregular rare events.
 - Studio mode adapts resolution, then lowers active count on sustained low FPS until the visitor manually selects a population; testing mode leaves count under manual control.
 - The visible bounds include a mesh-aware margin; the shortened boundary steering zone permits closer edge contact, and a smoothed 8×8 projected density field redistributes crowded regions. No intentional clipping or visible wrap.
 - Verify desktop Chrome, Safari/WebGPU where supported, mobile portrait/landscape, click/drag at all corners, resize, offscreen pause, hidden tab, fallback, 10–20 minute run, and GPU device loss.
-- Compare 60k, 100k, 200k, 300k and 750k on appropriate hardware. Do not treat 750k as a guaranteed real-time target. Check frame-time spikes and long-run edge behaviour, not just FPS.
+- Compare 60k, 100k, 200k, and 300k on appropriate hardware. Do not treat 300k as a guaranteed real-time target. Check frame-time spikes and long-run edge behaviour, not just FPS.
 - Capture a poster only after the visual result is approved. Do not publish the release to the main studio site until these checks pass.
-- Keep the included software license and notices. Learning is a local contextual reward heuristic, not a neural model. Field shadows and fast pressure are approximations. No server-side learning.
+- Keep the included software license and notices. Global and regional learning are bounded contextual reward heuristics, not a neural model or biological life. Regional state is session-local. Field shadows and fast pressure are approximations. No server-side learning.

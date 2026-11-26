@@ -161,6 +161,7 @@ class mlsMpmSimulator {
         this.uniforms.visibleMin=uniform(new THREE.Vector3(2.04,2.04,2.04));
         this.uniforms.visibleMax=uniform(this.gridSize.clone().subScalar(2.04));
         this.uniforms.sampleStride = uniform(1,'uint');
+        this.uniforms.sampleOffset=uniform(0,'uint');
         this.telemetry = instancedArray(1024,'vec4').label('telemetry');
 
         this.kernels.clearGrid = Fn(() => {
@@ -636,7 +637,7 @@ class mlsMpmSimulator {
             this.particleBuffer.element(instanceIndex).get('color').assign(color);
         })().compute(1);
         this.kernels.sample = Fn(() => {
-            const i = instanceIndex.mul(this.uniforms.sampleStride);
+            const i = instanceIndex.mul(this.uniforms.sampleStride).add(this.uniforms.sampleOffset);
             const p = this.particleBuffer.element(i);
             this.telemetry.element(instanceIndex).assign(vec4(p.get('position'),p.get('density')));
             this.telemetry.element(instanceIndex.add(uint(512))).assign(vec4(p.get('velocity'),p.get('signal')));
@@ -644,10 +645,11 @@ class mlsMpmSimulator {
     }
 
     async observe() {
+        this.uniforms.sampleOffset.value=Math.floor(Math.random()*Math.max(1,this.uniforms.sampleStride.value));
         await this.renderer.computeAsync(this.kernels.sample);
         const a = new Float32Array(await this.renderer.getArrayBufferAsync(this.telemetry.value));
         const mean = new THREE.Vector3(), size = this.gridSize;
-        let density=0, density2=0, speed=0, speed2=0, edge=0, spread=0, signal=0, n=0; const hist=new Array(64).fill(0),sides=[0,0,0,0];
+        let density=0, density2=0, speed=0, speed2=0, edge=0, spread=0, signal=0, n=0; const hist=new Array(64).fill(0),sides=[0,0,0,0],regions=Array.from({length:64},()=>({speed:0,signal:0,vx:0,vy:0}));
         const lo=this.uniforms.visibleMin.value,hi=this.uniforms.visibleMax.value;
         for(let i=0;i<512;i++){
             const j=i*4,k=(512+i)*4;
@@ -657,7 +659,7 @@ class mlsMpmSimulator {
             const d=a[j+3]/Math.max(conf.restDensity,0.001),s=Math.hypot(a[k],a[k+1],a[k+2]);
             density+=d;density2+=d*d;speed+=s;speed2+=s*s;signal+=a[k+3];
             const xx=(a[j]-lo.x)/Math.max(.001,hi.x-lo.x),yy=(a[j+1]-lo.y)/Math.max(.001,hi.y-lo.y);
-            const bx=Math.min(7,Math.max(0,Math.floor(xx*8))),by=Math.min(7,Math.max(0,Math.floor(yy*8)));hist[by*8+bx]++;
+            const bx=Math.min(7,Math.max(0,Math.floor(xx*8))),by=Math.min(7,Math.max(0,Math.floor(yy*8)));const tileIndex=by*8+bx;hist[tileIndex]++;const region=regions[tileIndex];region.speed+=s;region.signal+=a[k+3];region.vx+=a[k];region.vy+=a[k+1];
             if(xx<.085)sides[0]++;if(xx>.915)sides[1]++;if(yy<.085)sides[2]++;if(yy>.915)sides[3]++;
             edge+=Math.min(xx,1-xx,yy,1-yy)<.085?1:0;n++;
         }
@@ -668,9 +670,10 @@ class mlsMpmSimulator {
             const j=i*4,x=a[j]/size.x,y=a[j+1]/size.y,z=a[j+2]/size.z;
             if(Number.isFinite(x+y+z)){spreadX+=(x-mean.x)**2;spreadY+=(y-mean.y)**2;spreadZ+=(z-mean.z)**2;spread+=(x-mean.x)**2+(y-mean.y)**2+(z-mean.z)**2;}
         }
+        for(let i=0;i<64;i++){const count=Math.max(1,hist[i]);for(const k of ['speed','signal','vx','vy'])regions[i][k]/=count;}
         const distribution=hist.map(x=>x/n);
         const entropy=-distribution.reduce((sum,p)=>sum+(p>0?p*Math.log(p):0),0)/Math.log(64);
-        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),spreadX:Math.sqrt(spreadX/n),spreadY:Math.sqrt(spreadY/n),spreadZ:Math.sqrt(spreadZ/n),coverage:hist.filter(x=>x>=3).length/64,sides:sides.map(x=>x/n),densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution};
+        return {mean,density:density/n,speed:speed/n,edge:edge/n,spread:Math.sqrt(spread/n),spreadX:Math.sqrt(spreadX/n),spreadY:Math.sqrt(spreadY/n),spreadZ:Math.sqrt(spreadZ/n),coverage:hist.filter(x=>x>=3).length/64,sides:sides.map(x=>x/n),densityContrast:Math.sqrt(Math.max(0,density2/n-(density/n)**2)),speedContrast:Math.sqrt(Math.max(0,speed2/n-(speed/n)**2)),signal:signal/n,entropy,distribution,regions};
     }
 
     setMouseRay(origin, direction, pos) {

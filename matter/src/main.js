@@ -3,6 +3,7 @@ import Simulator from './mls-mpm/mlsMpmSimulator.js';
 import ParticleRenderer from './mls-mpm/particleRenderer.js';
 import {conf} from './conf.js';
 import {AdaptivePolicy} from './policy.js';
+import {Organism} from './organism.js';
 import {compositionField,compositionMetrics} from './composition.js';
 import {paletteNames,paletteStops,selectStudy} from './palettes.js';
 const stage=document.querySelector('#stage'),status=document.querySelector('#status'),params=new URLSearchParams(location.search);
@@ -68,6 +69,7 @@ const modes=['gather','unfold','divide','orbit','rest','shear','braid','burst','
 const policy=new AdaptivePolicy(modes,conf.learn), renderers=new Map();
 let requestedCount=conf.particles,countRevision=0,measuredFps=null,manualCount=false;
 let compositionGoal=Array.from({length:64},()=>[0,0]);
+const organism=new Organism();let localGoal=Array.from({length:64},()=>[0,0,0]);
 let shadowMode=params.get('shadows')||'auto',shadowActive=false,renderCeiling=1,nextDiagnostic=0,slowWindows=0,fastWindows=0;
 const countFormat=new Intl.NumberFormat('en-GB');
 const nerveSource=v(),rareCenter=v(),rareAxis=v(1,0,0);
@@ -120,7 +122,7 @@ function direct(dt){
  u.flowPhase.value.copy(flowPhase);u.flowStrength.value=flowStrength*(.87+.13*breath);
  u.breath.value=breath*breathing;
  // Vortex centres drift continuously rather than settling into fixed positions.
- const movingOrigin=(i)=>flowOffset.copy(origins[i]).add(v(Math.sin(flowPhase.x+i*1.63)*grid.x*.022,Math.cos(flowPhase.y+i*2.12)*grid.y*.028,Math.sin(flowPhase.z+i*2.43)*grid.z*.028));
+ const movingOrigin=(i)=>flowOffset.copy(origins[i]).add(v(Math.sin(flowPhase.x+i*1.63)*grid.x*.032,Math.cos(flowPhase.y+i*2.12)*grid.y*.035,Math.sin(flowPhase.z+i*2.43)*grid.z*.033));
  u.vortexA.value.copy(movingOrigin(0));u.vortexB.value.copy(movingOrigin(1));u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  const m=metrics,compression=state==='gather'||rareKind===2;
  // The occupancy field, not the outer boundary, controls distribution.
@@ -129,7 +131,7 @@ function direct(dt){
  spreadForce.lerp(v(fx,fy,0),1-Math.exp(-dt*.30));spreadCenter.copy(grid).multiplyScalar(.5);
  u.spreadForce.value.copy(spreadForce);u.spreadCenter.value.copy(spreadCenter);
  const blend=1-Math.exp(-dt*.55);
- for(let i=0;i<64;i++){const p=sim.compositionVectors[i],q=compositionGoal[i];p.x+=(q[0]-p.x)*blend;p.y+=(q[1]-p.y)*blend;}
+ for(let i=0;i<64;i++){const p=sim.compositionVectors[i],q=compositionGoal[i],l=localGoal[i];p.x+=(clamp(q[0]+l[0],-.95,.95)-p.x)*blend;p.y+=(clamp(q[1]+l[1],-.95,.95)-p.y)*blend;p.z+=(l[2]-p.z)*blend;}
  if(conf.paletteMode<0&&age>=nextStudy&&!rareKind){
    changeStudy(selectStudy(state,m,studyRecent));nextStudy=age+rand(28,65);
  }
@@ -158,7 +160,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent=rareKind?rareNames[rareKind]:({gather:'condensing',unfold:'unfolding',divide:'dividing',orbit:'circulating',wall:'drifting',rest:'resting',shear:'shearing',braid:'weaving',burst:'expanding',fold:'folding',breathe:'breathing',wake:'awakening'}[state]||state);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent='Live study';document.querySelector('#regionalReadout').textContent=String(organism.learned);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.sculptural,la=1-Math.exp(-dt*4);
@@ -179,7 +181,7 @@ function setShadows(enabled){if(shadowActive===enabled&&renderer.shadowMap.enabl
 function updateVisibleBounds(){
  const u=sim.uniforms,halfX=grid.x*visibleFraction*.5,halfY=grid.y*visibleFraction*.5;
  // Conservative mesh radius in world units, including density and stretched cuboids.
- const extent=conf.shape==='rods'?1.85:conf.shape==='capsules'?1.19:.61;
+ const extent=conf.shape==='rods'?1.77:conf.shape==='capsules'?1.19:.61;
  const pad=extent*conf.actualSize*1.12+.005;
  const sx=u.screenScale.value,sy=u.screenScaleY.value;
  const minX=Math.max(2.04,grid.x*.5-halfX+pad/sx),minY=Math.max(2.04,grid.y*.5-halfY+pad/sy);
@@ -204,7 +206,7 @@ async function loop(now){
  const dt=previous?Math.min((now-previous)/1000,.033):1/60;previous=now;age+=dt;
  try{
   if(requestedCount!==conf.particles){
-   conf.particles=requestedCount;conf.updateParams();updateVisibleBounds();countRevision++;metrics=null;compositionGoal=Array.from({length:64},()=>[0,0]);
+   conf.particles=requestedCount;conf.updateParams();updateVisibleBounds();countRevision++;metrics=null;compositionGoal=Array.from({length:64},()=>[0,0]);localGoal=Array.from({length:64},()=>[0,0,0]);organism.reset();
    policy.begin(state,null,age);nextSample=age+.5;
    if(shadowMode==='auto'&&conf.particles>=200000)setShadows(false);
   }
@@ -216,7 +218,7 @@ async function loop(now){
    nextSample=age+1.8;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
    const revision=countRevision;
-   sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);if(!rareKind&&!pointerDown&&rippleAge>2)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
+   sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);localGoal=organism.observe(m,age,policy.enabled,!!rareKind||pointerDown||rippleAge<2);if(!rareKind&&!pointerDown&&rippleAge>2)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
   }
   perfFrames++;if(!perfStart)perfStart=now;
   if(now-perfStart>2200){
@@ -267,7 +269,7 @@ async function start(){
  const fieldSelect=document.querySelector('#fieldShadow');if(!['deep','soft','off'].includes(fieldShadowMode))fieldShadowMode='deep';fieldSelect.value=fieldShadowMode;fieldSelect.onchange=()=>{fieldShadowMode=fieldSelect.value;};
  const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='metallic';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);};
  document.querySelector('#rare').onclick=()=>rareEvent();
- document.querySelector('#reset').onclick=()=>{policy.reset();policy.begin(state,metrics,age);};
+ document.querySelector('#reset').onclick=()=>{policy.reset();organism.reset();localGoal=Array.from({length:64},()=>[0,0,0]);policy.begin(state,metrics,age);};
  if(params.has('rare')){const kind=rareNames.indexOf(params.get('rare'));nextRare=Infinity;rareEvent(kind>0?kind:1);}
 
  resize();status.textContent='Initializing material field…';window.addEventListener('resize',resize);
@@ -293,7 +295,7 @@ async function start(){
  window.matterResume=()=>{paused=false;schedule();};
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
  document.querySelector('#labToggle').onclick=e=>{const show=document.body.classList.toggle('lab');e.currentTarget.setAttribute('aria-expanded',String(show));};
- window.sculptureStatus=()=>({palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
+ window.sculptureStatus=()=>({palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }
 start().catch(fail);

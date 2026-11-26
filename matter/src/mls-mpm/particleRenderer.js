@@ -160,7 +160,9 @@ class ParticleRenderer {
             //return attribute("position").xyz.mul(10).add(vec3(32,32,0));
             //return attribute("position").xyz.mul(0.1).add(positionAttribute.mul(vec3(1,1,0.4)));
             const mat = spheres ? null : calcLookAtMatrix(particleDirection.xyz);
-            vNormal.assign(transformNormalToView(spheres?normalLocal:mat.mul(normalLocal)));
+            const stretch=particle.get('velocity').length().mul(.28).clamp(0,1).mul(.55).add(.82);
+            const localNormal=spheres||capsules?normalLocal:normalLocal.mul(vec3(1,1,float(1).div(stretch)));
+            vNormal.assign(transformNormalToView(spheres?localNormal:mat.mul(localNormal)));
             vPigment.assign(particle.get('color'));
             vDensity.assign(particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(.001)).clamp(0,2));
             vMemory.assign(particle.get('memory'));
