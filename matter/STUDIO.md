@@ -48,3 +48,8 @@ On single-page navigation remove the iframe when leaving the experiment. Use sam
 - Keep the included software license and notices. Global and regional learning are bounded contextual reward heuristics, not a neural model or biological life. Regional state is session-local. Field shadows and fast pressure are approximations. No server-side learning.
 
 The public title is Unsettled. The existing `/matter/` route is retained to avoid breaking test links. Palette changes are renderer uniforms, independent of simulation updates, and no automatic palette switching is present. The default is Cobalt; density remains the default colour rule. The footer is outside the artwork viewport.
+
+
+## About copy and adaptive movement
+The public interface has no studio logo. The footer uses the LifeAfterLogic monochrome typographic language and a short visible description. The About panel explains the real-time GPU field, 64 local adaptive regions, local memory, action feedback and neighbour-to-neighbour signal propagation.
+The regional controller updates on fresh telemetry approximately every 1.2 seconds. Each region tracks local density, speed, stress, energy, memory and phase. It chooses between four local behaviours (restore, clockwise circulation, counter-clockwise circulation, relay), then updates its action values using the observed result. Signal activity spreads to adjacent regions and contributes to a three-dimensional movement field. This is bounded local adaptive feedback, not a neural network or biological consciousness.

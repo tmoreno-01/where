@@ -85,7 +85,7 @@ function choose(){
  if(m){scores.gather+=clamp((m.spread-.43)*8,0,1.6);scores.unfold+=clamp((m.density-0.8)*2.4,0,2.8)+clamp((.26-Math.min(m.spreadX??.22,m.spreadY??.22))*16,0,3)+clamp((.60-(m.coverage??.5))*3,0,1.8);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.unfold+=clamp((.68-(m.coverage??.5))*4,0,2);scores.braid+=clamp(((m.edgeMass??.44)-.44)*5,0,2);scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);scores.fold+=clamp((m.coverage-.45)*2,0,1)+clamp((.8-m.speedContrast)*.7,0,.55);scores.breathe+=clamp((.9-m.speed)*1.3,0,1.1);}
  for(const k of modes){scores[k]+=rand(0,.65)+policy.bonus(k,m);if(recent.includes(k))scores[k]-=1.5;if(k===state)scores[k]-=3;}
  const choice=forced&&modes.includes(forced)?forced:modes.reduce((a,b)=>scores[a]>scores[b]?a:b);
- recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);policy.begin(choice,m,age);
+ recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(10,23);policy.begin(choice,m,age);
  const set=(i,x,y,z)=>goals[i].set(x,y,z).multiply(grid);
  const axis=(i,x,y,z)=>axisGoals[i].set(x,y,z).normalize();
  driftGoal.set(0,0,0);gatherGoal=0;lightGoal=rand(-.75,.75);
@@ -121,7 +121,7 @@ function direct(dt){
  u.flowPhase.value.copy(flowPhase);u.flowStrength.value=flowStrength*(.87+.13*breath);
  u.breath.value=breath*breathing;
  // Vortex centres drift continuously rather than settling into fixed positions.
- const movingOrigin=(i)=>flowOffset.copy(origins[i]).add(v(Math.sin(flowPhase.x+i*1.63)*grid.x*.032,Math.cos(flowPhase.y+i*2.12)*grid.y*.035,Math.sin(flowPhase.z+i*2.43)*grid.z*.033));
+ const movingOrigin=(i)=>flowOffset.copy(origins[i]).add(v(Math.sin(flowPhase.x+i*1.63)*grid.x*.046,Math.cos(flowPhase.y+i*2.12)*grid.y*.048,Math.sin(flowPhase.z+i*2.43)*grid.z*.043));
  u.vortexA.value.copy(movingOrigin(0));u.vortexB.value.copy(movingOrigin(1));u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  const m=metrics,compression=state==='gather'||rareKind===2;
  // The occupancy field, not the outer boundary, controls distribution.
@@ -129,8 +129,8 @@ function direct(dt){
  const fy=clamp((.24-(m?.spreadY??.24))*.018,-.0015,.0025);
  spreadForce.lerp(v(fx,fy,0),1-Math.exp(-dt*.30));spreadCenter.copy(grid).multiplyScalar(.5);
  u.spreadForce.value.copy(spreadForce);u.spreadCenter.value.copy(spreadCenter);
- const blend=1-Math.exp(-dt*.55);
- for(let i=0;i<64;i++){const p=sim.compositionVectors[i],q=compositionGoal[i],l=localGoal[i];p.x+=(clamp(q[0]+l[0],-.95,.95)-p.x)*blend;p.y+=(clamp(q[1]+l[1],-.95,.95)-p.y)*blend;p.z+=(l[2]-p.z)*blend;}
+ const blend=1-Math.exp(-dt*.88);
+  for(let i=0;i<64;i++){const p=sim.compositionVectors[i],q=compositionGoal[i],l=localGoal[i];p.x+=(clamp(q[0]+l[0]*1.35,-.95,.95)-p.x)*blend;p.y+=(clamp(q[1]+l[1]*1.35,-.95,.95)-p.y)*blend;p.z+=(clamp(l[2]*1.25,-.34,.34)-p.z)*blend;}
  u.vortexC.value.copy(movingOrigin(2));u.vortexD.value.copy(movingOrigin(3));u.axisC.value.copy(axes[2]);u.axisD.value.copy(axes[3]);
  detail+=(detailGoal-detail)*a;u.detailForce.value=detail;
  if(age>=nextPulse){nextPulse=age+rand(17,37);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(.8,1.8);}}
@@ -213,7 +213,7 @@ async function loop(now){
   if(renderer.backend.device?.queue)await renderer.backend.device.queue.onSubmittedWorkDone();
   if(frame++===0){status.hidden=true;stage.classList.add('ready');if(conf.studio&&window.parent!==window)window.parent.postMessage({type:'matter:ready'},location.origin);}
   if(age>=nextSample&&!observing&&!senseError&&frame>3){
-   nextSample=age+1.8;observing=true;
+   nextSample=age+1.2;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
    const revision=countRevision;
    sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);localGoal=organism.observe(m,age,policy.enabled,!!rareKind||pointerDown||rippleAge<2);if(!rareKind&&!pointerDown&&rippleAge>2)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;if(stillPending)void drawStill();});
@@ -285,7 +285,7 @@ async function start(){
  document.querySelector('#pause').onclick=e=>{paused=!paused;const button=e.currentTarget;button.setAttribute('aria-label',paused?'Resume':'Pause');button.setAttribute('aria-pressed',String(paused));button.classList.toggle('is-paused',paused);if(paused)stop();else schedule();};
  document.querySelector('#new').onclick=()=>location.reload();
  document.querySelector('#full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{}};
- document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h'&&!/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))document.querySelector('#labToggle').click();if(e.code==='Space'&&!/BUTTON|INPUT|SELECT|TEXTAREA/.test(e.target.tagName)){e.preventDefault();document.querySelector('#pause').click();}});
+ document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h'&&!/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))document.querySelector('#labToggle').click();if(e.key==='Escape'){setAbout(false);document.body.classList.remove('lab');document.querySelector('#labToggle').setAttribute('aria-expanded','false');}if(e.code==='Space'&&!/BUTTON|INPUT|SELECT|TEXTAREA/.test(e.target.tagName)){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  if(params.has('lab')){document.body.classList.add('lab');document.querySelector('#labToggle').setAttribute('aria-expanded','true');}
  if(conf.studio){
@@ -296,7 +296,10 @@ async function start(){
  window.matterPause=()=>{paused=true;stop();};
  window.matterResume=()=>{paused=false;schedule();};
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- document.querySelector('#labToggle').onclick=e=>{const show=document.body.classList.toggle('lab');e.currentTarget.setAttribute('aria-expanded',String(show));};
+ const labToggle=document.querySelector('#labToggle'),aboutToggle=document.querySelector('#aboutToggle'),aboutPanel=document.querySelector('#aboutPanel');
+ labToggle.onclick=e=>{const show=document.body.classList.toggle('lab');e.currentTarget.setAttribute('aria-expanded',String(show));if(show){aboutPanel.hidden=true;aboutToggle.setAttribute('aria-expanded','false');}};
+ const setAbout=show=>{aboutPanel.hidden=!show;aboutToggle.setAttribute('aria-expanded',String(show));if(show){document.body.classList.remove('lab');labToggle.setAttribute('aria-expanded','false');}};
+ aboutToggle.onclick=()=>setAbout(aboutPanel.hidden);document.querySelector('#aboutClose').onclick=()=>setAbout(false);
  window.sculptureStatus=()=>({title:'Unsettled',palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }
