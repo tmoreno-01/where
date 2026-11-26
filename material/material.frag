@@ -32,57 +32,26 @@ vec3 warp(vec3 p,vec4 g){
 }
 // Continuous parameter genome, no interpolation between separate preset silhouettes.
 vec4 genome(){return mix(uA,uB,uMix);}
+uniform vec4 uBodies[16],uMeta[16],uAxes[16],uLinkA[12],uLinkB[12],uDrops[28];
+uniform int uLinks,uDropCount;
+vec3 frame(vec3 p,vec3 axis){vec3 ref=abs(axis.y)<.9?vec3(0,1,0):vec3(1,0,0);vec3 x=normalize(cross(axis,ref));return vec3(dot(p,x),dot(p,axis),dot(p,cross(x,axis)));}
+float objectField(vec3 p,int i){
+ vec4 b=uBodies[i],m=uMeta[i];float r=b.w;vec3 q=frame((p-b.xyz)/r,uAxes[i].xyz);
+ float broad=(length(q)-2.05)*r;
+ if(broad>.10)return broad;
+ q.xz=rot(.48*sin(q.y*2.+m.y)+.48*q.y)*q.xz;q+=.10*sin(q.yzx*3.7+m.y);
+ float heat=m.z,d;
+ if(m.x<.5){d=ell(q,vec3(1.18,.83,.86));d=smin(d,ell(q-vec3(.52,.36,.13),vec3(.78,.55,.56)),.23);d=smin(d,ell(q+vec3(.43,.47,.18),vec3(.65,.72,.52)),.18);d=smax(d,-(length(q.xz+vec2(.16,-.1))-(.22+.08*sin(m.y))),.12);}
+ else if(m.x<1.5){float a=atan(q.z,q.x);vec3 v=q;v.y+=.41*sin(a*3.+m.y);d=torus(v,.78,.19+.065*sin(a*4.+m.y));v=q;v.xy=rot(1.2)*v.xy;v.y+=.24*sin(atan(v.z,v.x)*2.-m.y);d=smin(d,torus(v,.65,.135),.10);v=q;v.yz=rot(1.)*v.yz;d=smin(d,torus(v,.53,.115),.10);}
+ else if(m.x<2.5){float env=ell(q,vec3(1.02,1.28,.87));vec3 w=q*5.4+.48*sin(q.zxy*3.1+m.y);float f=gyro(w),fine=gyro(w*1.65+1.);d=smax(env,(abs(f)-(.25+.28*heat))/10.,.045);d=smin(d,smax(env,(abs(fine)-.11)/17.,.025),.035);d=smax(d,-(length(q.xz+vec2(.13,.1))-.26),.06);}
+ else{float shell=abs(ell(q,vec3(.94,1.2,1.0)))-(.065+.05*heat);float gate=sin(q.y*8.+m.y+q.x*2.)+.65*sin(q.z*5.-m.y);d=smax(shell,gate*.095-.015,.035);vec3 v=q;v.xy=rot(.75)*v.xy;d=smin(d,torus(v,.65,.16),.10);}
+ return d*r*.67;
+}
 float scene(vec3 p){
- vec4 g=genome();float t=uTime;
- vec3 d0=p-uTouch;p-=d0/max(length(d0),.1)*exp(-dot(d0,d0)*3.2)*uPulse*.15;
- vec3 q=warp(p,g);
- // An asymmetric, elongated armature, with an arcing spine and a swollen lower root.
- vec3 c=q;c.xy=rot(.32+.22*sin(g.x+t*.09))*c.xy;
- float e=ell(c-vec3(-.18,.07,.02),vec3(1.18,.83,.78));
- vec3 r=q-vec3(.31,.11,-.02);r.xy=rot(.84+.36*sin(g.y))*r.xy;r.yz=rot(.45+.22*sin(t*.13))*r.yz;
- float ph=atan(r.z,r.x);
- r.y+=.32*sin(ph*2.+g.x+t*.17)+.10*sin(ph*5.-t*.23+g.w);
- float arc=torus(r,.81,.32+.09*sin(ph*3.+g.z));
- e=smin(e,arc,.27);
- vec3 tip=q-vec3(.51,-.54,.19);tip.xy=rot(-.65+sin(g.w)*.32)*tip.xy;
- e=smin(e,ell(tip,vec3(.91,.31,.38)),.22);
- vec3 upper=q-vec3(-.37,.66,-.18);upper.xy=rot(.75+sin(g.z)*.25)*upper.xy;
- e=smin(e,ell(upper,vec3(.76,.34,.30)),.19);
- // Large voids in the cast; their orientations change independently.
- vec3 h=q-vec3(.04,.04,.06);h.xz=rot(.8+g.x*.17)*h.xz;h.xy=rot(.44+t*.075)*h.xy;
- e=smax(e,-ell(h,vec3(.30+.095*sin(t*.14+g.y),.88,.39)),.11);
- vec3 h2=q-vec3(-.63,.25,.12);h2.yz=rot(g.z*.24+t*.1)*h2.yz;
- e=smax(e,-ell(h2,vec3(.32,.30,.81)),.10);
- if(e>.095)return e;
- vec3 ch=chem(p);
- float concentration=ch.y,heat=ch.z;
- // Nested, warped sheets. Phase modulation makes the openings uneven,
- // so there is no single repeated unit-cell or uniform lattice.
- vec3 w=q*vec3(5.7,6.7,5.1);
- w+=.70*sin(q.zxy*3.6+g.xyz+vec3(t*.22,t*.14,-t*.19));
- float v1=gyro(w+vec3(g.x*.7,g.y*.65,t*.17));
- float v2=gyro(w*1.73+1.1*sin(w.yzx*.49+g.zwx)+vec3(-t*.14,g.w,t*.11));
- float v3=gyro(w*.54+vec3(g.z,t*.12,g.y));
- float molten=smoothstep(-.45,.75,v3+concentration*.85);
- float thickness=mix(.13,.54,molten)+heat*.11;
- float sheet=(abs(v1+.22*sin(w.x*.67+w.z*.28)) - thickness)/10.8;
- float filaments=(abs(v2)-(.095+.15*heat))/19.6;
- // Intersection of secondary sheets with the main sheets forms branching
- // narrow conduits; larger fluid seams remain connected through the cast.
- float lace=smax(filaments,abs(v1+.12)/10.8-.085,.012);
- float seams=(abs(v1)-.79)/10.8;
- seams=smax(seams,(-v3-.13)/7.0,.025);
- float structure=smin(sheet,lace,.023);
- structure=smin(structure,seams,.031);
- // Small windows cut through thicker junctions without erasing the armature.
- float cut=(abs(v2+v3*.32)-.22)/19.6;
- structure=smax(structure,-cut,.003+.009*(1.-molten));
- float body=smax(e,structure,.035);
- // Fluid exterior ridges welded to a local subset of the porous surface.
- float skin=abs(e+.022)-(.025+.052*molten);
- skin=smax(skin,(.16-v3)/7.0,.028);
- body=smin(body,skin,.029);
- return body*.73;
+ float d=10.;for(int i=0;i<16;i++){float broad=length(p-uBodies[i].xyz)-uBodies[i].w*2.05;if(broad<d+.10)d=smin(d,objectField(p,i),.035);}
+ for(int i=0;i<12;i++){if(i>=uLinks)break;vec4 a=uLinkA[i],b=uLinkB[i];vec3 delta=b.xyz-a.xyz;float ll=max(dot(delta,delta),.0001);float t=clamp(dot(p-a.xyz,delta)/ll,0.,1.);vec3 centre=mix(a.xyz,b.xyz,t);float bd=length(p-centre)-a.w*2.7;if(bd<d+.05){vec3 axis=normalize(delta+vec3(.00001));vec3 n=normalize(cross(axis,abs(axis.y)<.9?vec3(0,1,0):vec3(1,0,0)));vec3 k=cross(axis,n);float phase=t*16.+b.w+uTime*.9;float rad=a.w*(.62+.30*sin(t*PI)+.16*sin(phase));float f=length(p-centre)-rad;vec3 coil=centre+(n*cos(phase)+k*sin(phase))*a.w*1.3;f=smin(f,length(p-coil)-a.w*.34,.012);d=smin(d,f,.026);}}
+ for(int i=0;i<28;i++){if(i>=uDropCount)break;vec4 a=uDrops[i];d=smin(d,length(p-a.xyz)-a.w,.009);}
+ return d;
 }
 vec3 normalAt(vec3 p){
  float e=.0020;vec2 k=vec2(1.,-1.);
@@ -109,9 +78,9 @@ float occlusion(vec3 p,vec3 n){
  return clamp(1.-a*5.1,.17,1.);
 }
 vec3 surface(vec3 p,vec3 n,vec3 rd){
- vec3 c=chem(p);vec4 g=genome();vec3 q=warp(p,g);
+ vec3 c=chem(p);vec3 q=p;float nearest=10.,kind=0.,localHeat=0.;for(int i=0;i<16;i++){float d=length(p-uBodies[i].xyz)-uBodies[i].w;if(d<nearest){nearest=d;kind=uMeta[i].x;localHeat=uMeta[i].z;}}
  float ribbons=.5+.5*sin(q.x*18.+q.y*13.+sin(q.z*9.+uTime*.16)*2.2);
- float heat=clamp(c.z*.88+c.y*.41+.18*ribbons,0.,1.);
+ float heat=clamp(c.z*.34+c.y*.23+localHeat*.60+.12*ribbons,0.,1.);
  float phase=smoothstep(.23,.60,heat);
  float fine=sin(q.x*94.+sin(q.y*46.+q.z*38.)*2.4)*sin(q.z*80.-q.y*51.);
  float rough=.085+.10*phase+.022*fine;
@@ -123,7 +92,7 @@ vec3 surface(vec3 p,vec3 n,vec3 rd){
  else if(m>3.5){
   tint=mix(vec3(.83,.90,1.),vec3(.84,.28,.055),phase);
   rough=mix(.07,.26,phase)+.023*fine;
-  metal=mix(.99,.70,phase);
+  metal=mix(.99,.70,phase);if(kind>2.5){tint=mix(vec3(.82,.83,.78),vec3(.35,.09,.035),phase);metal=mix(.08,.65,phase);rough+=.10;}else if(kind>1.5){tint=mix(vec3(.30,.43,.50),vec3(.85,.44,.16),phase);rough+=.07;}else if(kind>.5){tint=mix(vec3(.93,.96,1.),vec3(.42,.50,.64),phase);}
  }
  vec3 r=reflect(rd,n);
  float fres=pow(1.-max(dot(n,-rd),0.),5.);
@@ -140,15 +109,15 @@ vec3 surface(vec3 p,vec3 n,vec3 rd){
  return (reflected+tint*(1.-metal)*diffuse)*(.28+.72*ao)+emission;
 }
 vec2 bound(vec3 ro,vec3 rd){
- float b=dot(ro,rd),c=dot(ro,ro)-2.15*2.15,h=b*b-c;if(h<0.)return vec2(1.,-1.);h=sqrt(h);return vec2(-b-h,-b+h);
+ float b=dot(ro,rd),c=dot(ro,ro)-3.8*3.8,h=b*b-c;if(h<0.)return vec2(1.,-1.);h=sqrt(h);return vec2(-b-h,-b+h);
 }
 void main(){
  vec2 uv=(2.*gl_FragCoord.xy-uRes)/min(uRes.x,uRes.y);
- vec3 ro=vec3(4.9*cos(uPitch)*sin(uYaw),4.9*sin(uPitch),4.9*cos(uPitch)*cos(uYaw));
+ vec3 ro=vec3(7.6*cos(uPitch)*sin(uYaw),7.6*sin(uPitch),7.6*cos(uPitch)*cos(uYaw));
  vec3 f=normalize(-ro),right=normalize(cross(f,vec3(0,1,0))),up=cross(right,f);
- vec3 rd=normalize(f*3.05+right*uv.x+up*uv.y);
+ vec3 rd=normalize(f*2.65+right*uv.x+up*uv.y);
  vec3 col=mix(vec3(.042,.047,.053),vec3(.145,.151,.156),exp(-dot(uv,uv)*.72));
- float floorT=rd.y<-.0001?(-1.72-ro.y)/rd.y:1e4;
+ float floorT=rd.y<-.0001?(-2.9-ro.y)/rd.y:1e4;
  if(floorT>0.&&floorT<20.){
   vec3 fp=ro+rd*floorT;float pool=exp(-dot(fp.xz,fp.xz)*.68);
   vec3 floorCol=vec3(.086,.090,.096)*(1.-.64*pool);
@@ -163,7 +132,7 @@ void main(){
    if(i>=uSteps||t>end)break;
    float d=scene(ro+rd*t);
    if(d<.0015+t*.00013){hit=true;break;}
-   t+=max(.0022,d*.84);
+   t+=max(.0020,d*.76);
   }
  }
  if(hit){vec3 p=ro+rd*t;vec3 n=normalAt(p);col=surface(p,n,rd);}
