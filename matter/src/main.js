@@ -15,7 +15,7 @@ origins.push(v(.30,.72,.28).multiply(grid),v(.70,.29,.75).multiply(grid));
 goals.push(origins[2].clone(),origins[3].clone());
 const axes=[v(.2,.4,1).normalize(),v(-.4,.6,-1).normalize(),v(.4,1,.3).normalize(),v(-1,.4,.5).normalize()],axisGoals=axes.map(x=>x.clone());
 const pointer=v(),pointerDelta=v(),pointerGoal=v(),clickCenter=v(),pulseCenter=v(),previousPointer=v();
-let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'contrast',finishMode=params.get('finish')||'metallic';
+let pendingClick=0,dragDirty=false,lightingMode=params.get('lighting')||'contrast',finishMode=params.get('finish')||'organic';
 let fieldShadowMode=params.get('fieldshadow')||'deep';
 let brightness=1.15;
 const visibleFraction=.87;
@@ -73,9 +73,9 @@ let shadowMode=params.get('shadows')||'on',shadowActive=false,renderCeiling=1,ne
 const countFormat=new Intl.NumberFormat('en-GB');
 const nerveSource=v(),rareCenter=v(),rareAxis=v(1,0,0);
 let nervePower=0,nextNerve=5,rareKind=0,rareStart=0,rareDuration=1,nextRare=rand(240,540),rareCount=0;
-const rareNames=['none','resonance','eclipse','fission','palimpsest'];
+const rareNames=['none','resonance','eclipse','fission','palimpsest','molt'];
 function rareEvent(kind){
- rareKind=kind||1+Math.floor(Math.random()*4);rareStart=age;rareDuration=rand(14,23);rareCount++;
+ rareKind=kind||1+Math.floor(Math.random()*5);rareStart=age;rareDuration=rand(14,23);rareCount++;
  rareCenter.copy(metrics?.mean||v(.5,.5,.5)).multiply(grid);
  rareAxis.set(rand(-1,1),rand(-1,1),rand(-.5,.5)).normalize();nextRare=age+rand(300,720);
 }
@@ -234,7 +234,7 @@ async function start(){
  ratio=Math.min(devicePixelRatio||1,conf.quality==='mobile'?.85:conf.particles>=200000?1.0:1.25);renderCeiling=ratio;
  renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ReinhardToneMapping;renderer.toneMappingExposure=.82;
  await renderer.init();if(!renderer.backend.isWebGPUBackend)throw Error('Unable to initialize the WebGPU backend.');
- renderer.shadowMap.enabled=conf.quality!=='mobile';renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.appendChild(renderer.domElement);
+ renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.appendChild(renderer.domElement);
  scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.66;
  camera=new THREE.OrthographicCamera(-1,1,.5,-.5,.015,10);camera.position.set(0,.5,-2.2);camera.lookAt(target);
  scene.add(new THREE.HemisphereLight(0xb8cff5,0x151f42,.13));
@@ -265,8 +265,8 @@ async function start(){
  brightnessSlider.oninput=()=>{brightness=Number(brightnessSlider.value);brightnessLabel.textContent=Math.round(brightness*100)+'%';};
  const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='contrast';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
  const fieldSelect=document.querySelector('#fieldShadow');if(!['deep','soft','off'].includes(fieldShadowMode))fieldShadowMode='deep';fieldSelect.value=fieldShadowMode;fieldSelect.onchange=()=>{fieldShadowMode=fieldSelect.value;};
- const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='metallic';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);refreshStill();};
- document.querySelector('#rare').onclick=()=>rareEvent(4);
+ const finishSelect=document.querySelector('#finish');if(!['organic','glossy','metallic','matte'].includes(finishMode))finishMode='organic';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);refreshStill();};
+ document.querySelector('#rare').onclick=()=>rareEvent(5);
  document.querySelector('#reset').onclick=()=>{policy.reset();organism.reset();localGoal=Array.from({length:64},()=>[0,0,0]);policy.begin(state,metrics,age);};
  if(params.has('rare')){const kind=rareNames.indexOf(params.get('rare'));nextRare=Infinity;rareEvent(kind>0?kind:1);}
 
@@ -300,7 +300,7 @@ async function start(){
  labToggle.onclick=e=>{const show=document.body.classList.toggle('lab');e.currentTarget.setAttribute('aria-expanded',String(show));if(show){aboutPanel.hidden=true;aboutToggle.setAttribute('aria-expanded','false');}};
  const setAbout=show=>{aboutPanel.hidden=!show;aboutToggle.setAttribute('aria-expanded',String(show));if(show){document.body.classList.remove('lab');labToggle.setAttribute('aria-expanded','false');}};
  aboutToggle.onclick=()=>setAbout(aboutPanel.hidden);document.querySelector('#aboutClose').onclick=()=>setAbout(false);
- window.sculptureStatus=()=>({title:'Unsettled',palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
+ window.sculptureStatus=()=>({title:'Ravelith',palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }
 start().catch(fail);

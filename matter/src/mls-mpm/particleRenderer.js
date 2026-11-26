@@ -93,6 +93,64 @@ const createRoundedBox = (width, height, depth, radius) => {
 }
 
 
+
+const createSpiculeGeometry = () => {
+    const radialSegments = conf.maxParticles >= 200000 ? 3 : 5;
+    const makeTube = (points, radii) => {
+        const path = points.map(point => new THREE.Vector3(...point));
+        const positions = [], indices = [];
+        for (let i = 0; i < path.length; i++) {
+            const tangent = (i === 0 ? path[1].clone().sub(path[0]) : i === path.length - 1 ? path[i].clone().sub(path[i - 1]) : path[i + 1].clone().sub(path[i - 1])).normalize();
+            const reference = Math.abs(tangent.y) > .88 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+            const side = new THREE.Vector3().crossVectors(tangent, reference).normalize();
+            const up = new THREE.Vector3().crossVectors(tangent, side).normalize();
+            for (let j = 0; j < radialSegments; j++) {
+                const angle = j / radialSegments * Math.PI * 2;
+                const vertex = path[i].clone()
+                    .addScaledVector(side, Math.cos(angle) * radii[i])
+                    .addScaledVector(up, Math.sin(angle) * radii[i]);
+                positions.push(vertex.x, vertex.y, vertex.z);
+            }
+        }
+        for (let i = 0; i < path.length - 1; i++) {
+            for (let j = 0; j < radialSegments; j++) {
+                const a = i * radialSegments + j;
+                const b = i * radialSegments + (j + 1) % radialSegments;
+                const c = (i + 1) * radialSegments + (j + 1) % radialSegments;
+                const d = (i + 1) * radialSegments + j;
+                indices.push(a, b, d, b, c, d);
+            }
+        }
+        const start = positions.length / 3;
+        positions.push(...path[0].toArray());
+        const end = positions.length / 3;
+        positions.push(...path[path.length - 1].toArray());
+        for (let j = 0; j < radialSegments; j++) {
+            const next = (j + 1) % radialSegments;
+            indices.push(start, next, j);
+            const a = (path.length - 1) * radialSegments + j;
+            const b = (path.length - 1) * radialSegments + next;
+            indices.push(end, a, b);
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        return geometry;
+    };
+    const branches = [
+        { points: [[0, 0, -1.15], [.025, .015, -.48], [-.035, .02, .18], [.015, 0, .96]], radii: [.018, .082, .065, .006] },
+        { points: [[-.035, .02, .18], [-.24, .12, .38], [-.55, .19, .63]], radii: [.060, .034, .004] },
+        { points: [[.025, .015, -.48], [.23, -.17, -.70], [.49, -.37, -.94]], radii: [.052, .028, .004] },
+        { points: [[.015, 0, .63], [-.16, .27, .81], [-.31, .48, 1.02]], radii: [.045, .023, .003] }
+    ];
+    const tubes = branches.map(branch => makeTube(branch.points, branch.radii));
+    const geometry = BufferGeometryUtils.mergeGeometries(tubes, false);
+    tubes.forEach(tube => tube.dispose());
+    geometry.computeBoundingSphere();
+    return geometry;
+};
+
 class ParticleRenderer {
     mlsMpmSim = null;
     object = null;
@@ -100,7 +158,7 @@ class ParticleRenderer {
     uniforms = {};
 
     constructor(mlsMpmSim,shape=conf.shape) {
-        const spheres=shape==='spheres',capsules=shape==='capsules';
+        const spheres=shape==='spheres',capsules=shape==='capsules',spicules=shape==='spicules';
         this.mlsMpmSim = mlsMpmSim;
 
         /*const box = new THREE.BoxGeometry(0.7, 0.7,3);
@@ -117,11 +175,13 @@ class ParticleRenderer {
         this.defaultIndexCount = roundedBoxGeometry.index.count;
         this.shadowIndexCount = boxGeometry.index.count;
 
-        const mergedGeometry = capsules
-            ? new THREE.CapsuleGeometry(0.23,1.90,2,conf.maxParticles>=200000?6:8,1).rotateX(Math.PI/2)
-            : spheres
-                ? new THREE.SphereGeometry(0.61,conf.maxParticles>=200000?7:9,conf.maxParticles>=200000?5:6)
-                : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
+        const mergedGeometry = spicules
+            ? createSpiculeGeometry()
+            : capsules
+                ? new THREE.CapsuleGeometry(0.23,1.90,2,conf.maxParticles>=200000?6:8,1).rotateX(Math.PI/2)
+                : spheres
+                    ? new THREE.SphereGeometry(0.61,conf.maxParticles>=200000?7:9,conf.maxParticles>=200000?5:6)
+                    : BufferGeometryUtils.mergeGeometries([roundedBoxGeometry, boxGeometry]);
         if(shape!=='rods'){this.defaultIndexCount=mergedGeometry.index.count;this.shadowIndexCount=this.defaultIndexCount;}
 
         this.geometry = new THREE.InstancedBufferGeometry().copy(mergedGeometry);
@@ -164,6 +224,7 @@ class ParticleRenderer {
             //return attribute("position").xyz.mul(0.1).add(positionAttribute.mul(vec3(1,1,0.4)));
             const mat = spheres ? null : calcLookAtMatrix(particleDirection.xyz);
             const remembered=particle.get('memory').clamp(0,1);
+            const signalValue=particle.get('signal');
             const stretch=particle.get('velocity').length().mul(.28).clamp(0,1).mul(.55).add(.82).add(remembered.mul(.72));
             const localNormal=spheres||capsules?normalLocal:normalLocal.mul(vec3(1,1,float(1).div(stretch)));
             vNormal.assign(transformNormalToView(spheres?localNormal:mat.mul(localNormal)));
@@ -175,14 +236,19 @@ class ParticleRenderer {
             vDensity.assign(particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(.001)).clamp(0,2));
             vMemory.assign(particle.get('memory'));
             vEnergy.assign(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(.25)).clamp(0,2));
-            vSignal.assign(particle.get('signal'));
+            vSignal.assign(signalValue);
             const shadow=particle.get('illumination').clamp(.15,1);
             vIllumination.assign(shadow);
             vAo.assign(shadow.mul(.43).add(.57).mul(float(1).sub(particlePosition.z.div(95).pow(2).mul(.13))).clamp(.50,1));
             const speed = particle.get('velocity').length().mul(0.28).clamp(0,1);
             const local = attribute("position").xyz;
-            const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).clamp(0.72,1.12);
+            const radius = particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(0.001)).mul(0.22).add(0.78).add(remembered.mul(.12)).clamp(0.72,1.18);
             if(spheres) return local.mul(this.uniforms.size).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
+            if(spicules){
+                const growth=remembered.mul(.48).add(signalValue.mul(.22));
+                const organicLocal=vec3(local.x.add(local.z.mul(local.z).mul(growth)),local.y.add(local.z.mul(growth).mul(.42)),local.z.mul(stretch));
+                return mat.mul(organicLocal.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
+            }
             if(capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
             return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
         })();
@@ -237,14 +303,14 @@ class ParticleRenderer {
         const s = (1/64);
         this.object.position.set(-conf.gridX*0.5*s,0,0);
         this.object.scale.set(s,s,s);
-        this.object.castShadow = conf.quality!=='mobile';
+        this.object.castShadow = true;
         this.object.receiveShadow = true;
     }
 
     setPalette(index){const colors=paletteStops[index];if(!colors)return;colors.forEach((c,i)=>this.uniforms.paletteStops[i].value.set(...c));}
     setColorRule(value){this.uniforms.colorRule.value=value;}
     setFinish(finish){
-        const p=finish==='metallic'?[.11,.92,.10,.10,1.55,1.1]:finish==='matte'?[.60,.02,0,.55,.025,.25]:[.15,.04,1,.075,.82,1.0];
+        const p=finish==='organic'?[.36,.07,.72,.22,.62,.82]:finish==='metallic'?[.11,.92,.10,.10,1.55,1.1]:finish==='matte'?[.60,.02,0,.55,.025,.25]:[.15,.04,1,.075,.82,1.0];
         const keys=['finishRoughness','finishMetalness','coat','coatRoughness','cardStrength','cardSharpness'];
         keys.forEach((k,i)=>{this.uniforms[k].value=p[i];});
     }

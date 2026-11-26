@@ -547,7 +547,7 @@ class mlsMpmSimulator {
             const rareDir=rareR.div(rareR.length().max(2));
             const rareWeight=float(1).div(float(1).add(rareR.dot(rareR).div(560)));
             const kind=this.uniforms.rareKind, rare=this.uniforms.rareStrength;
-            const resonance=select(kind.equal(1),rare.mul(rareWeight),select(kind.equal(4),rare.mul(oldMemory).mul(rareWeight),float(0)));
+            const resonance=select(kind.equal(1),rare.mul(rareWeight),select(kind.equal(4),rare.mul(oldMemory).mul(rareWeight),select(kind.equal(5),rare.mul(oldMemory).mul(rareWeight),float(0))));
             const trigger=incoming.sub(0.14).mul(6.0).clamp(0,1).max(source).max(contactSignal).max(resonance).clamp(0,1).mul(float(1).sub(oldRecovery.mul(1.8)).clamp(0,1));
             const signal=oldSignal.add(trigger.mul(3.4).mul(float(1).sub(oldSignal)).sub(oldSignal.mul(0.83)).mul(this.uniforms.dt)).clamp(0,1).mul(this.uniforms.nervesEnabled);
             const recovery=oldRecovery.add(oldSignal.mul(0.65).sub(oldRecovery.mul(0.12)).mul(this.uniforms.dt)).clamp(0,1).mul(this.uniforms.nervesEnabled);
@@ -558,7 +558,8 @@ class mlsMpmSimulator {
             // Palimpsest: only particles carrying a history are pulled into a brief spiralling recall.
             const echoTangent=cross(this.uniforms.rareAxis,rareDir).mul(.48);
             const echo=rareDir.mul(-.72).add(echoTangent).mul(oldMemory.mul(1.25)).mul(rareWeight);
-            const rareForce=select(kind.equal(4),echo,select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0)))).mul(rare);
+            const molt=rareDir.mul(.78).add(echoTangent.mul(1.45)).mul(oldMemory.mul(.72).add(.18)).mul(rareWeight);
+            const rareForce=select(kind.equal(5),molt,select(kind.equal(4),echo,select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
             // A broad soft collision layer prevents planar accumulation.
             const margin=vec3(3.0,3.0,4.0);

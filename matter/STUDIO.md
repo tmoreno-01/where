@@ -1,10 +1,10 @@
-# Unsettled — studio integration / RC 06
+# Ravelith — studio integration / RC 07
 
-A continuously evolving, browser-native metallic particle sculpture. The simulation runs on the visitor's GPU. No remote simulation, paid APIs or video streams.
+A continuously evolving, browser-native synthetic ecology. Branching spicule units are instanced on the visitor's GPU; regional memory steers their morphogenesis and periodic molts scatter material into new forms. No remote simulation, paid APIs or video streams.
 
 ## Entry points
 - Testing: `/matter/` (monochrome studio footer including particle count; add `?lab=1` for all technical controls; 300,000 default desktop particles; up to 300,000).
-- Presentation: `/matter/?studio=1` (monochrome studio footer, manually selected fixed colour studies driven by local density, metallic cuboids, Contrast lighting, 115% brightness, fast solver, deep field shadows; 200,000 desktop / 12,000 mobile starting particles).
+- Presentation: `/matter/?studio=1` (monochrome studio footer, manually selected fixed colour studies driven by local density, branching spicules, Fossil pigment, organic-shell finish, Contrast lighting, 115% brightness, fast solver, deep field shadows; 200,000 desktop / 12,000 mobile starting particles).
 - Press H to toggle the lab controls; add `&clean=1` to hide all controls; Space pauses/resumes.
 
 ## Integration
@@ -14,8 +14,8 @@ Use a same-origin iframe inside an explicitly sized, overflow-hidden experiment 
 
 Example:
 ```html
-<section class="matter-panel" aria-label="Unsettled — living material experiment">
-  <iframe id="matter" title="Unsettled — live particle sculpture"
+<section class="matter-panel" aria-label="Ravelith — living material experiment">
+  <iframe id="matter" title="Ravelith — live particle sculpture"
     src="/matter/?studio=1" loading="lazy" allow="fullscreen"></iframe>
 </section>
 <style>
@@ -47,7 +47,7 @@ On single-page navigation remove the iframe when leaving the experiment. Use sam
 - Capture a poster only after the visual result is approved. Do not publish the release to the main studio site until these checks pass.
 - Keep the included software license and notices. Global and regional learning are bounded contextual reward heuristics, not a neural model or biological life. Regional state is session-local. Field shadows and fast pressure are approximations. No server-side learning.
 
-The public title is Unsettled. The existing `/matter/` route is retained to avoid breaking test links. Palette changes are renderer uniforms, independent of simulation updates, and no automatic palette switching is present. The default is Cobalt; density remains the default colour rule. The footer is outside the artwork viewport.
+The public title is Ravelith. The existing `/matter/` route is retained to avoid breaking test links. Palette changes are renderer uniforms, independent of simulation updates, and no automatic palette switching is present. The default is Fossil; density remains the default colour rule. The default geometry is a tapered, asymmetric, four-branch spicule with memory-responsive deformation and an organic-shell material finish. The footer is outside the artwork viewport.
 
 
 ## About copy and adaptive movement
@@ -55,7 +55,7 @@ The public interface has no studio logo. The footer uses the LifeAfterLogic mono
 The regional controller updates on fresh telemetry approximately every 1.2 seconds. Each region tracks local density, speed, stress, energy, memory and phase. It chooses between four local behaviours (restore, clockwise circulation, counter-clockwise circulation, relay), then updates its action values using the observed result. Signal activity spreads to adjacent regions and contributes to a three-dimensional movement field. This is bounded local adaptive feedback, not a neural network or biological consciousness.
 
 
-## USP: the living palimpsest
-The defining behaviour is persistent, self-referential motion history. Each particle retains a slow-decaying memory of acceleration, touch and movement. Memory changes rod elongation, surface finish, pigment and momentum. The 64 regional controller cells also retain directional traces; spatial differences in those traces create a curl field that feeds previous movement back into new movement.
-The manual "Reawaken memory" control triggers the Palimpsest event. Memory-bearing particles receive a temporary inward spiral force and can reactivate local signals, causing the artwork to briefly gather its own history before dispersing. This is a real-time GPU simulation with a bounded regional feedback controller, not a neural network or biological consciousness.
-Mesh shadows are enabled by default, including on mobile at a reduced shadow-map resolution. The performance governor reduces render resolution and, only under sustained severe load, may downgrade shadows to automatic mode.
+## USP: an anatomy without a species
+Ravelith is a synthetic ecology, not a simulation of a named organism. Each GPU particle is rendered as a tapered, asymmetric, branching spicule. Particle memory affects branch deformation, scale, pigment and surface roughness. The 64-region controller retains directional traces; differences between neighbouring traces feed back into the three-dimensional movement field.
+A fifth rare event, "molt", sends memory-bearing particles into a temporary outward spiral. This sheds a local arrangement and seeds a new one. The manual "Trigger a molt" control invokes this event. The system remains a real-time GPU simulation with bounded regional feedback, not a neural network or biological consciousness.
+Mesh shadows are enabled by default on desktop and mobile. Mobile uses a reduced shadow-map resolution; the performance governor may reduce render resolution and, only under sustained severe load, downgrade shadows to automatic mode.
