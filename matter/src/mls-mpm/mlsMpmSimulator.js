@@ -110,7 +110,7 @@ class mlsMpmSimulator {
         this.uniforms.axisA = uniform(new THREE.Vector3(0,0,1));
         this.uniforms.axisB = uniform(new THREE.Vector3(0,0,-1));
         this.uniforms.drive = uniform(0.8);
-        this.uniforms.palette = uniform(0.0);
+
         this.uniforms.gather = uniform(0.0);
         this.uniforms.lightDirection=uniform(new THREE.Vector3(-.6,.52,-.62).normalize());
         this.uniforms.fieldShadows=uniform(1.0);
@@ -124,9 +124,9 @@ class mlsMpmSimulator {
         this.uniforms.pulse = uniform(0.0);
         this.uniforms.pulseCenter = uniform(new THREE.Vector3());
         this.uniforms.speedRef = uniform(1.8);
-        this.uniforms.colorMix = uniform(conf.densityOnly?0.0:1.0);
-        this.uniforms.paletteMode = uniform(conf.paletteMode);
-        this.uniforms.pigmentStops=Array.from({length:5},()=>uniform(new THREE.Vector3(.1,.2,.3)));
+
+
+
         this.uniforms.edgeBias=uniform(new THREE.Vector3());
         this.compositionVectors=Array.from({length:64},()=>new THREE.Vector3());
         this.uniforms.compositionField=uniformArray(this.compositionVectors,'vec3');
@@ -615,26 +615,6 @@ class mlsMpmSimulator {
             const retained = oldMemory.mul(float(1).sub(this.uniforms.dt.mul(0.018))).clamp(0,1);
             const memory = retained.add(excitation.mul(this.uniforms.dt).mul(0.18).mul(float(1).sub(retained))).clamp(0,1).mul(this.uniforms.memoryEnabled);
             memoryNode.assign(memory);
-            const energy = speed.mul(0.86).add(den.div(den.add(1)).mul(0.12)).add(accel.mul(0.07)).add(heading.mul(0.035));
-            const densitySignal = den.div(den.add(0.50));
-            const t = mix(densitySignal,energy,this.uniforms.colorMix).add(this.uniforms.palette.mul(0.028)).clamp(0,1);
-            // Five curated linear-light pigments, animated by the autonomous director.
-            const spatial=normalizedPosition.x.mul(.19).add(normalizedPosition.y.mul(.13)).add(normalizedPosition.z.mul(.07));
-            const pigmentT=t.mul(.89).add(spatial).add(memory.mul(.12)).add(.055).clamp(0,1);
-            const stops=this.uniforms.pigmentStops;
-            const a0=mix(stops[0],stops[1],pigmentT.mul(4).clamp(0,1));
-            const a1=mix(a0,stops[2],pigmentT.sub(.25).mul(4).clamp(0,1));
-            const a2=mix(a1,stops[3],pigmentT.sub(.50).mul(4).clamp(0,1));
-            const pigment=mix(a2,stops[4],pigmentT.sub(.75).mul(4).clamp(0,1));
-            const afterimage = mix(stops[1],stops[3],memory);
-            const remembered = mix(pigment,afterimage,memory.mul(0.42).mul(this.uniforms.colorMix));
-            const nerveColor=mix(stops[2],stops[4],signal);
-            const activated=mix(remembered,nerveColor,signal.mul(0.72));
-            const eclipseTint=mix(activated,vec3(0.12,0.035,0.28),select(kind.equal(2),rare.mul(0.48),float(0)));
-            const illuminated = eclipseTint.mul(speed.mul(0.28).add(0.80)).mul(accel.mul(0.13).add(0.94));
-            const oldColor = this.particleBuffer.element(instanceIndex).get('color');
-            const color = mix(oldColor,illuminated,0.16);
-            this.particleBuffer.element(instanceIndex).get('color').assign(color);
         })().compute(1);
         this.kernels.sample = Fn(() => {
             const i = instanceIndex.mul(this.uniforms.sampleStride).add(this.uniforms.sampleOffset);

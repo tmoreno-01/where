@@ -3,11 +3,3 @@ export const studies=[["Cobalt",["#121a36","#283d85","#4287aa","#9adbdc","#e5ecd
 export const paletteNames=studies.map(p=>p[0]);
 export function linearHex(hex){return [1,3,5].map(i=>{const v=parseInt(hex.slice(i,i+2),16)/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});}
 export const paletteStops=studies.map(([,colors])=>colors.map(linearHex));
-export function selectStudy(state,m,recent,random=Math.random){
- const pools={gather:[0,3,5],unfold:[1,2,4],divide:[1,3,5],orbit:[0,1,3],wall:[0,2,4],rest:[0,4,5],shear:[1,2,3],braid:[1,3,4],burst:[2,3,5],fold:[1,2,3],breathe:[0,4,5]};
- let pool=(pools[state]||[0,1,2,3,4,5]).filter(i=>!recent.includes(i));
- if(!pool.length)pool=[0,1,2,3,4,5].filter(i=>!recent.includes(i));
- if(!pool.length)pool=[0,1,2,3,4,5];
- if(m?.signal>.22&&pool.includes(3)&&random()<.45)return 3;
- return pool[Math.floor(random()*pool.length)];
-}

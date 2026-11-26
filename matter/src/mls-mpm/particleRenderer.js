@@ -2,6 +2,7 @@ import * as THREE from "three/webgpu";
 import {Fn, attribute, triNoise3D, time, vec3, vec4, float, varying,instanceIndex,mix,normalize,cross,mat3,normalLocal,transformNormalToView,mx_hsvtorgb,mrt,uniform,select} from "three/tsl";
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {conf} from "../conf.js";
+import {paletteStops} from "../palettes.js";
 
 
 export const calcLookAtMatrix = /*#__PURE__*/ Fn( ( [ target_immutable ] ) => {
@@ -142,10 +143,12 @@ class ParticleRenderer {
         this.uniforms.coatRoughness=uniform(.075);
         this.uniforms.cardStrength=uniform(.82);
         this.uniforms.cardSharpness=uniform(1.0);
+        this.uniforms.paletteStops=paletteStops[conf.paletteMode].map(c=>uniform(new THREE.Vector3(...c)));
+        this.uniforms.colorRule=uniform(conf.densityOnly?0:1);
         const vAo = varying(0, "vAo");
         const vIllumination=varying(float(1),"vIllumination");
         const vNormal = varying(vec3(0,0,1), "vMatterNormal");
-        const vPigment=varying(vec3(0),"vMatterPigment");
+        const vTone=varying(float(.5),"vUnsettledTone");
         const vDensity=varying(float(0),"vMatterDensity");
         const vMemory=varying(float(0),"vMatterMemory");
         const vEnergy=varying(float(0),"vMatterEnergy");
@@ -163,7 +166,11 @@ class ParticleRenderer {
             const stretch=particle.get('velocity').length().mul(.28).clamp(0,1).mul(.55).add(.82);
             const localNormal=spheres||capsules?normalLocal:normalLocal.mul(vec3(1,1,float(1).div(stretch)));
             vNormal.assign(transformNormalToView(spheres?localNormal:mat.mul(localNormal)));
-            vPigment.assign(particle.get('color'));
+            const d=particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(.001)).clamp(0,4);
+            const speedRatio=particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(.25));
+            const densityTone=d.div(d.add(.72)).mul(1.14).clamp(0,1);
+            const speedTone=speedRatio.div(speedRatio.add(.58)).mul(.86).add(densityTone.mul(.14));
+            vTone.assign(mix(densityTone,speedTone,this.uniforms.colorRule).clamp(0,1));
             vDensity.assign(particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(.001)).clamp(0,2));
             vMemory.assign(particle.get('memory'));
             vEnergy.assign(particle.get('velocity').length().div(this.mlsMpmSim.uniforms.speedRef.max(.25)).clamp(0,2));
@@ -178,6 +185,14 @@ class ParticleRenderer {
             if(capsules) return mat.mul(local.mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
             return mat.mul(local.mul(vec3(1,1,speed.mul(0.55).add(0.82))).mul(this.uniforms.size)).mul(radius).add(particlePosition.mul(vec3(this.uniforms.chamberX,this.uniforms.chamberY,0.65)));
         })();
+        // Palette is evaluated in the render shader, independently of simulation steps.
+        const stops=this.uniforms.paletteStops;
+        const t=vTone.clamp(0,1);
+        const p0=mix(stops[0],stops[1],t.mul(4).clamp(0,1));
+        const p1=mix(p0,stops[2],t.sub(.25).mul(4).clamp(0,1));
+        const p2=mix(p1,stops[3],t.sub(.50).mul(4).clamp(0,1));
+        const p3=mix(p2,stops[4],t.sub(.75).mul(4).clamp(0,1));
+        const vPigment=mix(p3,stops[4],vSignal.mul(.13)).clamp(0,1).toVar('unsettledPigment');
         const n=normalize(vNormal);
         const bounce=mix(vec3(.52,.65,.86),vec3(1),vIllumination);
         this.material.colorNode=vPigment.mul(bounce).mul(vIllumination.mul(.68).add(.32));
@@ -200,7 +215,7 @@ class ParticleRenderer {
         const strip=card(.72,.18,.67,.07,.47);
         const top=card(.04,.86,.50,.42,.085);
         const fresnel=float(.24).add(float(.76).mul(float(1).sub(n.z.abs()).pow(3)));
-        const reflectedTint=mix(vec3(1),vPigment.mul(.82).add(.24),this.uniforms.finishMetalness);
+        const reflectedTint=mix(vec3(1),vPigment.mul(.92).add(.12),this.uniforms.finishMetalness);
         const cards=vec3(1,.93,.82).mul(key).add(vec3(.56,.75,1).mul(strip.mul(.80))).add(vec3(.83,.91,1).mul(top.mul(.50)));
         const polish=cards.mul(reflectedTint).mul(fresnel).mul(this.uniforms.cardStrength).mul(vIllumination.mul(.63).add(.37));
         this.material.emissiveNode=vPigment.mul(vEnergy.mul(.018).add(vSignal.mul(.055))).mul(vIllumination.mul(.65).add(.35)).add(polish);
@@ -222,6 +237,8 @@ class ParticleRenderer {
         this.object.receiveShadow = true;
     }
 
+    setPalette(index){const colors=paletteStops[index];if(!colors)return;colors.forEach((c,i)=>this.uniforms.paletteStops[i].value.set(...c));}
+    setColorRule(value){this.uniforms.colorRule.value=value;}
     setFinish(finish){
         const p=finish==='metallic'?[.11,.92,.10,.10,1.55,1.1]:finish==='matte'?[.60,.02,0,.55,.025,.25]:[.15,.04,1,.075,.82,1.0];
         const keys=['finishRoughness','finishMetalness','coat','coatRoughness','cardStrength','cardSharpness'];

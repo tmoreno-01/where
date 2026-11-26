@@ -5,7 +5,7 @@ import {conf} from './conf.js';
 import {AdaptivePolicy} from './policy.js';
 import {Organism} from './organism.js';
 import {compositionField,compositionMetrics} from './composition.js';
-import {paletteNames,paletteStops,selectStudy} from './palettes.js';
+import {paletteNames,studies} from './palettes.js';
 const stage=document.querySelector('#stage'),status=document.querySelector('#status'),params=new URLSearchParams(location.search);
 const v=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z),rand=(a,b)=>a+(b-a)*Math.random(),clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
 const target=v(0,.5,.24),raycaster=new THREE.Raycaster(),plane=new THREE.Plane(v(0,0,-1),.24);
@@ -28,11 +28,10 @@ const tideAxis=v(1,0,0);
 let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
 const drift=v(),driftGoal=v(),recent=[],lightRig={};
 const spreadForce=v(.007,.009,0),spreadCenter=grid.clone().multiplyScalar(.5),edgeBias=v();
-let activeStudy=conf.paletteMode<0?Math.floor(Math.random()*6):conf.paletteMode;
-let studyRecent=[activeStudy],nextStudy=30,studyCurrent=paletteStops[activeStudy].map(c=>v(...c)),studyGoal=paletteStops[activeStudy].map(c=>v(...c));
-function changeStudy(i){activeStudy=i;studyGoal=paletteStops[i].map(c=>v(...c));studyRecent.push(i);if(studyRecent.length>3)studyRecent.shift();}
+let activeStudy=conf.paletteMode,colorRule=conf.densityOnly?0:1;
+function changeStudy(i){if(!Number.isInteger(i)||!studies[i])return;activeStudy=i;conf.paletteMode=i;for(const p of renderers.values())p.setPalette(i);document.querySelector('#studyName').textContent=paletteNames[i];document.querySelector('#paletteSwatch').style.background='linear-gradient(90deg,'+studies[i][1].join(',')+')';refreshStill();}
 let renderer,sim,particles,camera,scene,raf=0,previous=0,age=0,frame=0,ratio=1,perfStart=0,perfFrames=0,paused=false,running=false,dead=false;
-let drive=.95,driveGoal=.95,gather=0,gatherGoal=0,palette=0,paletteGoal=0,noise=.75,noiseGoal=.75;
+let drive=.95,driveGoal=.95,gather=0,gatherGoal=0,noise=.75,noiseGoal=.75;
 let nextDecision=0,nextSample=0,observing=false,metrics=null,senseError=false,state='wake',stateSince=0,lightMood=0,lightGoal=0,pointerDown=false,exposure=1.0;
 const forced=params.get('mode');let wallTarget=v(.84,.72,.5);
 function environment(){
@@ -89,7 +88,7 @@ function choose(){
  recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);policy.begin(choice,m,age);
  const set=(i,x,y,z)=>goals[i].set(x,y,z).multiply(grid);
  const axis=(i,x,y,z)=>axisGoals[i].set(x,y,z).normalize();
- driftGoal.set(0,0,0);gatherGoal=0;paletteGoal=rand(-.65,.65);lightGoal=rand(-.75,.75);
+ driftGoal.set(0,0,0);gatherGoal=0;lightGoal=rand(-.75,.75);
  set(2,rand(.15,.85),rand(.15,.85),rand(.15,.85));set(3,rand(.15,.85),rand(.15,.85),rand(.15,.85));
  axis(2,rand(-1,1),rand(-1,1),rand(-1,1));axis(3,rand(-1,1),rand(-1,1),rand(-1,1));detailGoal=rand(.65,1.5);
  paceGoal=choice==='rest'?rand(.38,.49):choice==='burst'?rand(.80,.94):choice==='shear'||choice==='braid'?rand(.65,.80):choice==='breathe'?rand(.46,.61):rand(.49,.69);
@@ -113,7 +112,7 @@ function direct(dt){
  if(age>=nextDecision)choose();
  const a=1-Math.exp(-dt*.17);
  for(let i=0;i<4;i++){origins[i].lerp(goals[i],a);axes[i].lerp(axisGoals[i],a*.65).normalize();}
- drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;palette+=(paletteGoal-palette)*a*.38;noise+=(noiseGoal-noise)*a;
+ drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;noise+=(noiseGoal-noise)*a;
  const u=sim.uniforms;
  flowRate.lerp(flowRateGoal,1-Math.exp(-dt*.15));flowPhase.addScaledVector(flowRate,dt);
  flowStrength+=(flowStrengthGoal-flowStrength)*(1-Math.exp(-dt*.22));
@@ -123,7 +122,7 @@ function direct(dt){
  u.breath.value=breath*breathing;
  // Vortex centres drift continuously rather than settling into fixed positions.
  const movingOrigin=(i)=>flowOffset.copy(origins[i]).add(v(Math.sin(flowPhase.x+i*1.63)*grid.x*.032,Math.cos(flowPhase.y+i*2.12)*grid.y*.035,Math.sin(flowPhase.z+i*2.43)*grid.z*.033));
- u.vortexA.value.copy(movingOrigin(0));u.vortexB.value.copy(movingOrigin(1));u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
+ u.vortexA.value.copy(movingOrigin(0));u.vortexB.value.copy(movingOrigin(1));u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  const m=metrics,compression=state==='gather'||rareKind===2;
  // The occupancy field, not the outer boundary, controls distribution.
  const fx=clamp((.24-(m?.spreadX??.24))*.018,-.0015,.0025);
@@ -132,10 +131,6 @@ function direct(dt){
  u.spreadForce.value.copy(spreadForce);u.spreadCenter.value.copy(spreadCenter);
  const blend=1-Math.exp(-dt*.55);
  for(let i=0;i<64;i++){const p=sim.compositionVectors[i],q=compositionGoal[i],l=localGoal[i];p.x+=(clamp(q[0]+l[0],-.95,.95)-p.x)*blend;p.y+=(clamp(q[1]+l[1],-.95,.95)-p.y)*blend;p.z+=(l[2]-p.z)*blend;}
- if(conf.paletteMode<0&&age>=nextStudy&&!rareKind){
-   changeStudy(selectStudy(state,m,studyRecent));nextStudy=age+rand(28,65);
- }
- for(let i=0;i<5;i++){studyCurrent[i].lerp(studyGoal[i],1-Math.exp(-dt*.36));u.pigmentStops[i].value.copy(studyCurrent[i]);}
  u.vortexC.value.copy(movingOrigin(2));u.vortexD.value.copy(movingOrigin(3));u.axisC.value.copy(axes[2]);u.axisD.value.copy(axes[3]);
  detail+=(detailGoal-detail)*a;u.detailForce.value=detail;
  if(age>=nextPulse){nextPulse=age+rand(17,37);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(.8,1.8);}}
@@ -160,7 +155,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent='Live study';document.querySelector('#regionalReadout').textContent=String(organism.learned);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#regionalReadout').textContent=String(organism.learned);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.sculptural,la=1-Math.exp(-dt*4);
@@ -190,15 +185,18 @@ function updateVisibleBounds(){
 }
 function resize(){
  if(!renderer||!camera)return;
- const aspect=innerWidth/Math.max(1,innerHeight),hh=61.8/128;
+ const width=Math.max(1,stage.clientWidth),height=Math.max(1,stage.clientHeight),aspect=width/height,hh=61.8/128;
  camera.left=-hh*aspect;camera.right=hh*aspect;camera.top=hh;camera.bottom=-hh;camera.updateProjectionMatrix();
  const bg=scene?.getObjectByName('studio backdrop');if(bg)bg.scale.set(2*hh*aspect*1.04,2*hh*1.04,1);
  // Keep the physical boundary outside the camera on every aspect ratio.
  const scaleX=2*hh*64*aspect/(conf.gridX*visibleFraction),scaleY=2*hh*64/(conf.gridY*visibleFraction);
  if(particles){particles.setChamberScale(scaleX,scaleY);sim.uniforms.screenScale.value=scaleX;sim.uniforms.screenScaleY.value=scaleY;updateVisibleBounds();}
- renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
+ renderer.setPixelRatio(ratio);renderer.setSize(width,height);
 }
 function fail(e){console.error(e);dead=true;status.hidden=false;status.textContent=conf.studio?'This live experiment requires WebGPU.':'This experiment requires a working WebGPU browser and graphics adapter. '+(e?.message||String(e));if(conf.studio&&window.parent!==window)window.parent.postMessage({type:'matter:unavailable'},location.origin);}
+let stillPending=false;
+function refreshStill(){if(!paused||dead||!renderer||!camera)return;stillPending=true;void drawStill();}
+async function drawStill(){if(!stillPending||running||observing||!paused||dead)return;stillPending=false;running=true;try{await renderer.renderAsync(scene,camera);if(renderer.backend.device?.queue)await renderer.backend.device.queue.onSubmittedWorkDone();}catch(e){fail(e);}finally{running=false;if(stillPending)void drawStill();else schedule();}}
 function stop(){if(raf)cancelAnimationFrame(raf);raf=0;previous=0;perfStart=0;perfFrames=0;}
 function schedule(){if(!raf&&!running&&!paused&&!dead&&!document.hidden&&hostVisible&&viewportVisible)raf=requestAnimationFrame(loop);}
 async function loop(now){
@@ -218,7 +216,7 @@ async function loop(now){
    nextSample=age+1.8;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
    const revision=countRevision;
-   sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);localGoal=organism.observe(m,age,policy.enabled,!!rareKind||pointerDown||rippleAge<2);if(!rareKind&&!pointerDown&&rippleAge>2)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
+   sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);localGoal=organism.observe(m,age,policy.enabled,!!rareKind||pointerDown||rippleAge<2);if(!rareKind&&!pointerDown&&rippleAge>2)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;if(stillPending)void drawStill();});
   }
   perfFrames++;if(!perfStart)perfStart=now;
   if(now-perfStart>2200){
@@ -228,7 +226,7 @@ async function loop(now){
    if(fastWindows>=5&&ratio<renderCeiling){ratio=Math.min(renderCeiling,ratio+.05);resize();fastWindows=0;}
    perfFrames=0;perfStart=now;
   }
- }catch(e){fail(e);stop();}finally{running=false;schedule();}
+ }catch(e){fail(e);stop();}finally{running=false;if(stillPending&&paused)void drawStill();else schedule();}
 }
 async function start(){
  if(!navigator.gpu)throw Error('WebGPU is unavailable.');
@@ -246,7 +244,7 @@ async function start(){
  const backdrop=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,map:backdropTexture(),roughness:.96,metalness:0}));
  backdrop.name='studio backdrop';
  backdrop.position.set(0,.5,.68);backdrop.rotation.y=Math.PI;backdrop.receiveShadow=true;scene.add(backdrop);
- sim=new Simulator(renderer);await sim.init();for(let i=0;i<5;i++)sim.uniforms.pigmentStops[i].value.copy(studyCurrent[i]);particles=new ParticleRenderer(sim,conf.shape);particles.setFinish(finishMode);renderers.set(conf.shape,particles);scene.add(particles.object);
+ sim=new Simulator(renderer);await sim.init();particles=new ParticleRenderer(sim,conf.shape);particles.setFinish(finishMode);particles.setPalette(activeStudy);particles.setColorRule(colorRule);renderers.set(conf.shape,particles);scene.add(particles.object);
  const shapeSelect=document.querySelector('#shape'),paletteSelect=document.querySelector('#palette'),colorSelect=document.querySelector('#color'),nerveToggle=document.querySelector('#nerves');
  shapeSelect.value=conf.shape;paletteSelect.value=String(conf.paletteMode);colorSelect.value=conf.densityOnly?'0':'1';nerveToggle.checked=conf.nerves;
  const solverSelect=document.querySelector('#solver'),shadowSelect=document.querySelector('#shadows');
@@ -256,9 +254,9 @@ async function start(){
  countSlider.min='5000';countSlider.max=String(conf.maxParticles);countSlider.step='1000';countSlider.value=String(conf.particles);
  countLabel.textContent=countFormat.format(conf.particles);
  countSlider.oninput=()=>{manualCount=true;requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
- shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value,sim.uniforms.screenScaleY.value);updateVisibleBounds();particles.update();};
- paletteSelect.onchange=()=>{conf.paletteMode=Number(paletteSelect.value);if(conf.paletteMode>=0)changeStudy(conf.paletteMode);else {changeStudy(selectStudy(state,metrics,studyRecent));nextStudy=age+rand(28,65);}};
- colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
+ shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setPalette(activeStudy);particles.setColorRule(colorRule);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value,sim.uniforms.screenScaleY.value);updateVisibleBounds();particles.update();};
+ paletteSelect.onchange=()=>changeStudy(Number(paletteSelect.value));changeStudy(activeStudy);
+ colorSelect.onchange=()=>{colorRule=Number(colorSelect.value);for(const p of renderers.values())p.setColorRule(colorRule);refreshStill();};
  nerveToggle.onchange=()=>{conf.nerves=nerveToggle.checked;sim.uniforms.nervesEnabled.value=conf.nerves?1:0;};
  document.querySelector('#learn').checked=conf.learn;
  document.querySelector('#learn').onchange=e=>{policy.enabled=e.target.checked;};
@@ -267,12 +265,16 @@ async function start(){
  brightnessSlider.oninput=()=>{brightness=Number(brightnessSlider.value);brightnessLabel.textContent=Math.round(brightness*100)+'%';};
  const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='contrast';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
  const fieldSelect=document.querySelector('#fieldShadow');if(!['deep','soft','off'].includes(fieldShadowMode))fieldShadowMode='deep';fieldSelect.value=fieldShadowMode;fieldSelect.onchange=()=>{fieldShadowMode=fieldSelect.value;};
- const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='metallic';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);};
+ const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='metallic';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);refreshStill();};
  document.querySelector('#rare').onclick=()=>rareEvent();
  document.querySelector('#reset').onclick=()=>{policy.reset();organism.reset();localGoal=Array.from({length:64},()=>[0,0,0]);policy.begin(state,metrics,age);};
  if(params.has('rare')){const kind=rareNames.indexOf(params.get('rare'));nextRare=Infinity;rareEvent(kind>0?kind:1);}
 
- resize();status.textContent='Initializing material field…';window.addEventListener('resize',resize);
+ const dock=document.querySelector('.dock');
+ const layout=()=>{document.body.style.setProperty('--dock-height',document.body.classList.contains('clean')?'0px':Math.ceil(dock.getBoundingClientRect().height)+'px');resize();refreshStill();};
+ if(params.has('clean'))document.body.classList.add('clean');layout();
+ if('ResizeObserver' in window)new ResizeObserver(layout).observe(dock);
+ status.textContent='Loading study…';window.addEventListener('resize',layout);
  const canvas=renderer.domElement;
  function pointerPos(e){const rect=canvas.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);const p=v();if(!raycaster.ray.intersectPlane(plane,p))return pointer.clone();const xScale=sim.uniforms.screenScale.value,yScale=sim.uniforms.screenScaleY.value;return v(clamp(p.x*64/xScale+grid.x*.5,2,grid.x-2),clamp((p.y-.5)*64/yScale+grid.y*.5,2,grid.y-2),grid.z*.5);}
  canvas.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();pointerDown=true;pointer.copy(pointerPos(e));previousPointer.copy(pointer);clickCenter.copy(pointer);pointerGoal.set(0,0,0);pointerDelta.set(0,0,0);pendingClick=.48;pointerPulse=.95;dragDirty=false;lastPointerTime=performance.now();canvas.setPointerCapture(e.pointerId);});
@@ -280,12 +282,12 @@ async function start(){
  const release=()=>{pointerDown=false;};
  canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);window.addEventListener('blur',release);
  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();else schedule();});
- document.querySelector('#pause').onclick=e=>{paused=!paused;const button=e.currentTarget;button.setAttribute('aria-label',paused?'Resume':'Pause');button.setAttribute('aria-pressed',String(paused));button.querySelector('.pause-icon').textContent=paused?'▶':'Ⅱ';if(paused)stop();else schedule();};
+ document.querySelector('#pause').onclick=e=>{paused=!paused;const button=e.currentTarget;button.setAttribute('aria-label',paused?'Resume':'Pause');button.setAttribute('aria-pressed',String(paused));button.classList.toggle('is-paused',paused);if(paused)stop();else schedule();};
  document.querySelector('#new').onclick=()=>location.reload();
  document.querySelector('#full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{}};
- document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h'&&!/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))document.body.classList.toggle('lab');if(e.code==='Space'&&!/BUTTON|INPUT|SELECT|TEXTAREA/.test(e.target.tagName)){e.preventDefault();document.querySelector('#pause').click();}});
+ document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h'&&!/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))document.querySelector('#labToggle').click();if(e.code==='Space'&&!/BUTTON|INPUT|SELECT|TEXTAREA/.test(e.target.tagName)){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
- if(params.has('lab'))document.body.classList.add('lab');
+ if(params.has('lab')){document.body.classList.add('lab');document.querySelector('#labToggle').setAttribute('aria-expanded','true');}
  if(conf.studio){
    document.body.classList.add('studio');
    if('IntersectionObserver' in window){const observer=new IntersectionObserver(entries=>{viewportVisible=entries[0].isIntersecting;if(!viewportVisible)stop();else schedule();},{threshold:0});observer.observe(stage);}
@@ -295,7 +297,7 @@ async function start(){
  window.matterResume=()=>{paused=false;schedule();};
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
  document.querySelector('#labToggle').onclick=e=>{const show=document.body.classList.toggle('lab');e.currentTarget.setAttribute('aria-expanded',String(show));};
- window.sculptureStatus=()=>({palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
+ window.sculptureStatus=()=>({title:'Unsettled',palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),organism:organism.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }
 start().catch(fail);
