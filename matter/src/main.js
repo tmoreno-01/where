@@ -61,7 +61,7 @@ const lightingPresets={
 };
 function light(name,color,intensity,pos,shadow=false){
  const l=new THREE.DirectionalLight(color,intensity);l.position.copy(pos);l.target.position.copy(target);scene.add(l,l.target);lightRig[name]=l;
- if(shadow){l.castShadow=true;l.shadow.mapSize.set(conf.particles>=200000?1024:1536,conf.particles>=200000?1024:1536);Object.assign(l.shadow.camera,{left:-2,right:2,top:1.4,bottom:-1.4,near:.02,far:6});l.shadow.camera.updateProjectionMatrix();l.shadow.bias=-.00035;l.shadow.normalBias=.0015;}
+ if(shadow){l.castShadow=true;const mapSize=conf.mobile?768:conf.particles>=200000?1024:1536;l.shadow.mapSize.set(mapSize,mapSize);Object.assign(l.shadow.camera,{left:-2,right:2,top:1.4,bottom:-1.4,near:.02,far:6});l.shadow.camera.updateProjectionMatrix();l.shadow.bias=-.00035;l.shadow.normalBias=.0015;}
  return l;
 }
 const modes=['gather','unfold','divide','orbit','rest','shear','braid','burst','fold','breathe'];
@@ -69,13 +69,13 @@ const policy=new AdaptivePolicy(modes,conf.learn), renderers=new Map();
 let requestedCount=conf.particles,countRevision=0,measuredFps=null,manualCount=false;
 let compositionGoal=Array.from({length:64},()=>[0,0]);
 const organism=new Organism();let localGoal=Array.from({length:64},()=>[0,0,0]);
-let shadowMode=params.get('shadows')||'auto',shadowActive=false,renderCeiling=1,nextDiagnostic=0,slowWindows=0,fastWindows=0;
+let shadowMode=params.get('shadows')||'on',shadowActive=false,renderCeiling=1,nextDiagnostic=0,slowWindows=0,fastWindows=0;
 const countFormat=new Intl.NumberFormat('en-GB');
 const nerveSource=v(),rareCenter=v(),rareAxis=v(1,0,0);
 let nervePower=0,nextNerve=5,rareKind=0,rareStart=0,rareDuration=1,nextRare=rand(240,540),rareCount=0;
-const rareNames=['none','resonance','eclipse','fission'];
+const rareNames=['none','resonance','eclipse','fission','palimpsest'];
 function rareEvent(kind){
- rareKind=kind||1+Math.floor(Math.random()*3);rareStart=age;rareDuration=rand(14,23);rareCount++;
+ rareKind=kind||1+Math.floor(Math.random()*4);rareStart=age;rareDuration=rand(14,23);rareCount++;
  rareCenter.copy(metrics?.mean||v(.5,.5,.5)).multiply(grid);
  rareAxis.set(rand(-1,1),rand(-1,1),rand(-.5,.5)).normalize();nextRare=age+rand(300,720);
 }
@@ -155,7 +155,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#regionalReadout').textContent=String(organism.learned);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#regionalReadout').textContent=String(organism.learned);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';const organismState=organism.snapshot();document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'memory '+Math.round(organismState.imprint*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.sculptural,la=1-Math.exp(-dt*4);
@@ -206,7 +206,7 @@ async function loop(now){
   if(requestedCount!==conf.particles){
    conf.particles=requestedCount;conf.updateParams();updateVisibleBounds();countRevision++;metrics=null;compositionGoal=Array.from({length:64},()=>[0,0]);localGoal=Array.from({length:64},()=>[0,0,0]);organism.reset();
    policy.begin(state,null,age);nextSample=age+.5;
-   if(shadowMode==='auto'&&conf.particles>=200000)setShadows(false);
+   if(shadowMode==='auto')setShadows(!conf.mobile&&conf.particles<200000);
   }
   direct(dt);await sim.update(dt,age);particles.update();await renderer.renderAsync(scene,camera);
   // Keep at most one rendered frame queued so input cannot sit behind a backlog of GPU frames.
@@ -222,7 +222,7 @@ async function loop(now){
   if(now-perfStart>2200){
    const fps=perfFrames*1000/(now-perfStart);measuredFps=fps;
    if(fps<42){slowWindows++;fastWindows=0;}else if(fps>56){fastWindows++;slowWindows=0;}else{slowWindows=0;fastWindows=0;}
-   if(slowWindows>=2){if(shadowMode==='auto'&&shadowActive)setShadows(false);else if(ratio>.65){ratio=Math.max(.65,ratio-.10);resize();}else if(conf.studio&&!manualCount&&fps<34&&requestedCount>(conf.mobile?6000:60000)){requestedCount=Math.max(conf.mobile?6000:60000,Math.round(requestedCount*.82/1000)*1000);document.querySelector('#particleCount').value=String(requestedCount);document.querySelector('#particleCountLabel').textContent=countFormat.format(requestedCount);}slowWindows=0;}
+   if(slowWindows>=2){if(shadowMode==='auto'&&shadowActive)setShadows(false);else if(ratio>.65){ratio=Math.max(.65,ratio-.10);resize();}else if(conf.studio&&!manualCount&&fps<34&&requestedCount>(conf.mobile?6000:60000)){requestedCount=Math.max(conf.mobile?6000:60000,Math.round(requestedCount*.82/1000)*1000);document.querySelector('#particleCount').value=String(requestedCount);document.querySelector('#particleCountLabel').textContent=countFormat.format(requestedCount);}else if(shadowMode==='on'&&shadowActive&&fps<30){setShadows(false);shadowMode='auto';document.querySelector('#shadows').value='auto';}slowWindows=0;}
    if(fastWindows>=5&&ratio<renderCeiling){ratio=Math.min(renderCeiling,ratio+.05);resize();fastWindows=0;}
    perfFrames=0;perfStart=now;
   }
@@ -238,7 +238,7 @@ async function start(){
  scene=new THREE.Scene();scene.background=new THREE.Color(0x101116);scene.environment=environment();scene.environmentIntensity=.66;
  camera=new THREE.OrthographicCamera(-1,1,.5,-.5,.015,10);camera.position.set(0,.5,-2.2);camera.lookAt(target);
  scene.add(new THREE.HemisphereLight(0xb8cff5,0x151f42,.13));
- light('key',0xfff4ec,1.65,v(-.85,1.65,-.95),conf.quality!=='mobile');
+ light('key',0xfff4ec,1.65,v(-.85,1.65,-.95),true);
  setShadows(shadowMode==='on'||(shadowMode==='auto'&&!conf.mobile&&conf.particles<200000));
  light('fill',0xa9c9ff,.60,v(-1.1,.35,-.7));light('rim',0xe7f1ff,1.85,v(.95,.88,.95));light('warm',0xffad73,.46,v(.15,-.6,.25));
  const backdrop=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,map:backdropTexture(),roughness:.96,metalness:0}));
@@ -266,7 +266,7 @@ async function start(){
  const lightingSelect=document.querySelector('#lighting');if(!lightingPresets[lightingMode])lightingMode='contrast';lightingSelect.value=lightingMode;lightingSelect.onchange=()=>{lightingMode=lightingSelect.value;};
  const fieldSelect=document.querySelector('#fieldShadow');if(!['deep','soft','off'].includes(fieldShadowMode))fieldShadowMode='deep';fieldSelect.value=fieldShadowMode;fieldSelect.onchange=()=>{fieldShadowMode=fieldSelect.value;};
  const finishSelect=document.querySelector('#finish');if(!['glossy','metallic','matte'].includes(finishMode))finishMode='metallic';finishSelect.value=finishMode;finishSelect.onchange=()=>{finishMode=finishSelect.value;particles.setFinish(finishMode);refreshStill();};
- document.querySelector('#rare').onclick=()=>rareEvent();
+ document.querySelector('#rare').onclick=()=>rareEvent(4);
  document.querySelector('#reset').onclick=()=>{policy.reset();organism.reset();localGoal=Array.from({length:64},()=>[0,0,0]);policy.begin(state,metrics,age);};
  if(params.has('rare')){const kind=rareNames.indexOf(params.get('rare'));nextRare=Infinity;rareEvent(kind>0?kind:1);}
 

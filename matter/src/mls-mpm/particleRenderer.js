@@ -163,7 +163,8 @@ class ParticleRenderer {
             //return attribute("position").xyz.mul(10).add(vec3(32,32,0));
             //return attribute("position").xyz.mul(0.1).add(positionAttribute.mul(vec3(1,1,0.4)));
             const mat = spheres ? null : calcLookAtMatrix(particleDirection.xyz);
-            const stretch=particle.get('velocity').length().mul(.28).clamp(0,1).mul(.55).add(.82);
+            const remembered=particle.get('memory').clamp(0,1);
+            const stretch=particle.get('velocity').length().mul(.28).clamp(0,1).mul(.55).add(.82).add(remembered.mul(.72));
             const localNormal=spheres||capsules?normalLocal:normalLocal.mul(vec3(1,1,float(1).div(stretch)));
             vNormal.assign(transformNormalToView(spheres?localNormal:mat.mul(localNormal)));
             const d=particleDensity.div(this.mlsMpmSim.uniforms.restDensity.max(.001)).clamp(0,4);
@@ -192,14 +193,17 @@ class ParticleRenderer {
         const p1=mix(p0,stops[2],t.sub(.25).mul(4).clamp(0,1));
         const p2=mix(p1,stops[3],t.sub(.50).mul(4).clamp(0,1));
         const p3=mix(p2,stops[4],t.sub(.75).mul(4).clamp(0,1));
-        const vPigment=mix(p3,stops[4],vSignal.mul(.13)).clamp(0,1).toVar('unsettledPigment');
+        const livePigment=mix(p3,stops[4],vSignal.mul(.13)).clamp(0,1);
+        const imprintTone=vMemory.sub(.08).div(.52).clamp(0,1).pow(1.4);
+        const imprintPigment=mix(stops[0],stops[4],vMemory.mul(.82).add(.08));
+        const vPigment=mix(livePigment,imprintPigment,imprintTone.mul(.58)).clamp(0,1).toVar('unsettledPigment');
         const n=normalize(vNormal);
         const bounce=mix(vec3(.52,.65,.86),vec3(1),vIllumination);
         this.material.colorNode=vPigment.mul(bounce).mul(vIllumination.mul(.68).add(.32));
         this.material.aoNode=vAo;
         this.material.normalNode=n;
         this.material.clearcoatNormalNode=n;
-        this.material.roughnessNode=this.uniforms.finishRoughness.add(vDensity.mul(.018)).sub(vMemory.mul(.018)).clamp(.065,.78);
+        this.material.roughnessNode=this.uniforms.finishRoughness.add(vDensity.mul(.018)).sub(vMemory.mul(.065)).clamp(.065,.78);
         this.material.metalnessNode=this.uniforms.finishMetalness;
         this.material.clearcoatNode=this.uniforms.coat;
         this.material.clearcoatRoughnessNode=this.uniforms.coatRoughness;
@@ -218,7 +222,7 @@ class ParticleRenderer {
         const reflectedTint=mix(vec3(1),vPigment.mul(.92).add(.12),this.uniforms.finishMetalness);
         const cards=vec3(1,.93,.82).mul(key).add(vec3(.56,.75,1).mul(strip.mul(.80))).add(vec3(.83,.91,1).mul(top.mul(.50)));
         const polish=cards.mul(reflectedTint).mul(fresnel).mul(this.uniforms.cardStrength).mul(vIllumination.mul(.63).add(.37));
-        this.material.emissiveNode=vPigment.mul(vEnergy.mul(.018).add(vSignal.mul(.055))).mul(vIllumination.mul(.65).add(.35)).add(polish);
+        this.material.emissiveNode=vPigment.mul(vEnergy.mul(.018).add(vSignal.mul(.055)).add(imprintTone.mul(.018))).mul(vIllumination.mul(.65).add(.35)).add(polish);
 
         //this.material.fragmentNode = vec4(0,0,0,1);
         //this.material.envNode = vec3(0.5);

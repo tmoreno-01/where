@@ -53,3 +53,9 @@ The public title is Unsettled. The existing `/matter/` route is retained to avoi
 ## About copy and adaptive movement
 The public interface has no studio logo. The footer uses the LifeAfterLogic monochrome typographic language and a short visible description. The About panel explains the real-time GPU field, 64 local adaptive regions, local memory, action feedback and neighbour-to-neighbour signal propagation.
 The regional controller updates on fresh telemetry approximately every 1.2 seconds. Each region tracks local density, speed, stress, energy, memory and phase. It chooses between four local behaviours (restore, clockwise circulation, counter-clockwise circulation, relay), then updates its action values using the observed result. Signal activity spreads to adjacent regions and contributes to a three-dimensional movement field. This is bounded local adaptive feedback, not a neural network or biological consciousness.
+
+
+## USP: the living palimpsest
+The defining behaviour is persistent, self-referential motion history. Each particle retains a slow-decaying memory of acceleration, touch and movement. Memory changes rod elongation, surface finish, pigment and momentum. The 64 regional controller cells also retain directional traces; spatial differences in those traces create a curl field that feeds previous movement back into new movement.
+The manual "Reawaken memory" control triggers the Palimpsest event. Memory-bearing particles receive a temporary inward spiral force and can reactivate local signals, causing the artwork to briefly gather its own history before dispersing. This is a real-time GPU simulation with a bounded regional feedback controller, not a neural network or biological consciousness.
+Mesh shadows are enabled by default, including on mobile at a reduced shadow-map resolution. The performance governor reduces render resolution and, only under sustained severe load, may downgrade shadows to automatic mode.

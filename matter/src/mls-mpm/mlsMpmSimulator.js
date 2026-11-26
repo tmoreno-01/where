@@ -547,7 +547,7 @@ class mlsMpmSimulator {
             const rareDir=rareR.div(rareR.length().max(2));
             const rareWeight=float(1).div(float(1).add(rareR.dot(rareR).div(560)));
             const kind=this.uniforms.rareKind, rare=this.uniforms.rareStrength;
-            const resonance=select(kind.equal(1),rare.mul(rareWeight),float(0));
+            const resonance=select(kind.equal(1),rare.mul(rareWeight),select(kind.equal(4),rare.mul(oldMemory).mul(rareWeight),float(0)));
             const trigger=incoming.sub(0.14).mul(6.0).clamp(0,1).max(source).max(contactSignal).max(resonance).clamp(0,1).mul(float(1).sub(oldRecovery.mul(1.8)).clamp(0,1));
             const signal=oldSignal.add(trigger.mul(3.4).mul(float(1).sub(oldSignal)).sub(oldSignal.mul(0.83)).mul(this.uniforms.dt)).clamp(0,1).mul(this.uniforms.nervesEnabled);
             const recovery=oldRecovery.add(oldSignal.mul(0.65).sub(oldRecovery.mul(0.12)).mul(this.uniforms.dt)).clamp(0,1).mul(this.uniforms.nervesEnabled);
@@ -555,7 +555,10 @@ class mlsMpmSimulator {
             const twitch=cross(this.uniforms.axisC,sourceR.div(sourceR.length().max(2))).mul(signal.sub(oldSignal).max(0).mul(1.8));
             const lens=rareDir.mul(-0.95).mul(rareWeight);
             const split=this.uniforms.rareAxis.mul(rareR.dot(this.uniforms.rareAxis).mul(0.16).clamp(-1,1)).mul(0.9);
-            const rareForce=select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))).mul(rare);
+            // Palimpsest: only particles carrying a history are pulled into a brief spiralling recall.
+            const echoTangent=cross(this.uniforms.rareAxis,rareDir).mul(.48);
+            const echo=rareDir.mul(-.72).add(echoTangent).mul(oldMemory.mul(1.25)).mul(rareWeight);
+            const rareForce=select(kind.equal(4),echo,select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0)))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
             // A broad soft collision layer prevents planar accumulation.
             const margin=vec3(3.0,3.0,4.0);
@@ -569,7 +572,7 @@ class mlsMpmSimulator {
             const boundaryCurl=vec3(edgeNormal.y.mul(particlePosition.z.mul(.16).add(time.mul(.12)).sin()),edgeNormal.x.mul(particlePosition.z.mul(.18).sub(time.mul(.13)).cos()),edgeNormal.x.add(edgeNormal.y).mul(particlePosition.y.mul(.12).sin())).mul(.31);
             particleVelocity.addAssign(boundaryCurl.mul(this.uniforms.dt));
             // Recent disturbance slightly changes local mobility; slowly relaxes back.
-            particleVelocity.mulAssign(float(0.997).add(oldMemory.mul(0.002).mul(this.uniforms.memoryEnabled)));
+            particleVelocity.mulAssign(float(0.994).add(oldMemory.mul(0.004).mul(this.uniforms.memoryEnabled)));
             particleVelocity.mulAssign(particleMass);
             particleVelocity.mulAssign(float(1).min(float(5.2).div(particleVelocity.length().max(0.001))));
 
@@ -612,8 +615,8 @@ class mlsMpmSimulator {
             const heading = particleVelocity.x.div(particleVelocity.length().max(0.001));
             const contact = influence.mul(this.uniforms.pointerActive).mul(.45).add(clickWeight.mul(this.uniforms.pointerPulse).mul(.10));
             const excitation = accel.mul(0.22).add(contact).add(tideBand.mul(this.uniforms.tideAmount.abs()).mul(0.15)).clamp(0,1);
-            const retained = oldMemory.mul(float(1).sub(this.uniforms.dt.mul(0.018))).clamp(0,1);
-            const memory = retained.add(excitation.mul(this.uniforms.dt).mul(0.18).mul(float(1).sub(retained))).clamp(0,1).mul(this.uniforms.memoryEnabled);
+            const retained=oldMemory.mul(float(1).sub(this.uniforms.dt.mul(0.004))).clamp(0,1);
+            const memory=retained.add(excitation.mul(this.uniforms.dt).mul(0.08).mul(float(1).sub(retained))).clamp(0,1).mul(this.uniforms.memoryEnabled);
             memoryNode.assign(memory);
         })().compute(1);
         this.kernels.sample = Fn(() => {
