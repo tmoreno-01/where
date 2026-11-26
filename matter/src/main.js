@@ -20,6 +20,9 @@ let brightness=1.15;
 const visibleFraction=.87;
 let hostVisible=true,viewportVisible=true;
 let pointerPulse=0,pointerStrength=0,lastPointerTime=0,detail=.8,detailGoal=.8,pulse=0,nextPulse=9,speedRef=1.0;
+let rippleAge=10;
+const flowPhase=v(rand(0,6.28),rand(0,6.28),rand(0,6.28)),flowRate=v(.27,.19,.31),flowRateGoal=v(.27,.19,.31),flowOffset=v();
+let flowStrength=.19,flowStrengthGoal=.19,breathPhase=rand(0,6.28),breathRate=.21,breathRateGoal=.21;
 const tideAxis=v(1,0,0);
 let pace=.66,paceGoal=.66,tideStart=-100,tideDuration=12,tideStrength=0,nextTide=12;
 const drift=v(),driftGoal=v(),recent=[],lightRig={};
@@ -61,7 +64,7 @@ function light(name,color,intensity,pos,shadow=false){
  if(shadow){l.castShadow=true;l.shadow.mapSize.set(conf.particles>=200000?1024:1536,conf.particles>=200000?1024:1536);Object.assign(l.shadow.camera,{left:-2,right:2,top:1.4,bottom:-1.4,near:.02,far:6});l.shadow.camera.updateProjectionMatrix();l.shadow.bias=-.00035;l.shadow.normalBias=.0015;}
  return l;
 }
-const modes=['gather','unfold','divide','orbit','rest','shear','braid','burst'];
+const modes=['gather','unfold','divide','orbit','rest','shear','braid','burst','fold','breathe'];
 const policy=new AdaptivePolicy(modes,conf.learn), renderers=new Map();
 let requestedCount=conf.particles,countRevision=0,measuredFps=null,manualCount=false;
 let compositionGoal=Array.from({length:64},()=>[0,0]);
@@ -77,8 +80,8 @@ function rareEvent(kind){
 }
 function choose(){
  policy.finish();const m=metrics;
- const scores={gather:.15,unfold:1.75,divide:1.15,orbit:1,rest:.45,shear:1.45,braid:1.65,burst:.95};
- if(m){scores.gather+=clamp((m.spread-.43)*8,0,1.6);scores.unfold+=clamp((m.density-0.8)*2.4,0,2.8)+clamp((.26-Math.min(m.spreadX??.22,m.spreadY??.22))*16,0,3)+clamp((.60-(m.coverage??.5))*3,0,1.8);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.unfold+=clamp((.68-(m.coverage??.5))*4,0,2);scores.braid+=clamp(((m.edgeMass??.44)-.44)*5,0,2);scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);}
+ const scores={gather:.15,unfold:1.75,divide:1.15,orbit:1,rest:.45,shear:1.45,braid:1.65,burst:.95,fold:1.40,breathe:1.15};
+ if(m){scores.gather+=clamp((m.spread-.43)*8,0,1.6);scores.unfold+=clamp((m.density-0.8)*2.4,0,2.8)+clamp((.26-Math.min(m.spreadX??.22,m.spreadY??.22))*16,0,3)+clamp((.60-(m.coverage??.5))*3,0,1.8);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.unfold+=clamp((.68-(m.coverage??.5))*4,0,2);scores.braid+=clamp(((m.edgeMass??.44)-.44)*5,0,2);scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);scores.fold+=clamp((m.coverage-.45)*2,0,1)+clamp((.8-m.speedContrast)*.7,0,.55);scores.breathe+=clamp((.9-m.speed)*1.3,0,1.1);}
  for(const k of modes){scores[k]+=rand(0,.65)+policy.bonus(k,m);if(recent.includes(k))scores[k]-=1.5;if(k===state)scores[k]-=3;}
  const choice=forced&&modes.includes(forced)?forced:modes.reduce((a,b)=>scores[a]>scores[b]?a:b);
  recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);policy.begin(choice,m,age);
@@ -87,7 +90,9 @@ function choose(){
  driftGoal.set(0,0,0);gatherGoal=0;paletteGoal=rand(-.65,.65);lightGoal=rand(-.75,.75);
  set(2,rand(.15,.85),rand(.15,.85),rand(.15,.85));set(3,rand(.15,.85),rand(.15,.85),rand(.15,.85));
  axis(2,rand(-1,1),rand(-1,1),rand(-1,1));axis(3,rand(-1,1),rand(-1,1),rand(-1,1));detailGoal=rand(.65,1.5);
- paceGoal=choice==='rest'?rand(.38,.49):choice==='burst'?rand(.83,.99):choice==='shear'||choice==='braid'?rand(.69,.82):rand(.49,.69);
+ paceGoal=choice==='rest'?rand(.38,.49):choice==='burst'?rand(.80,.94):choice==='shear'||choice==='braid'?rand(.65,.80):choice==='breathe'?rand(.46,.61):rand(.49,.69);
+ flowRateGoal.set(rand(.12,.36),rand(.15,.39),rand(.11,.31));breathRateGoal=rand(.14,.32);
+ flowStrengthGoal=choice==='rest'?.09:choice==='fold'?rand(.25,.34):choice==='breathe'?rand(.16,.23):rand(.16,.28);
  switch(choice){
  case 'gather':set(0,.40,.44,.47);set(1,.60,.56,.52);axis(0,.2,.1,1);axis(1,.1,.4,1);gatherGoal=.18;driveGoal=.66;noiseGoal=.43;break;
  case 'unfold':set(0,.12,.24,.47);set(1,.88,.76,.53);axis(0,.2,.1,1);axis(1,.1,.2,-1);gatherGoal=-.08;driveGoal=1.35;noiseGoal=.98;break;
@@ -97,6 +102,8 @@ function choose(){
  case 'rest':set(0,.44,.50,.40);set(1,.56,.50,.60);axis(0,.2,1,.2);axis(1,.2,1,-.2);gatherGoal=.02;driveGoal=.40;noiseGoal=.35;detailGoal=.38;break;
  case 'shear':set(0,.22,.35,.3);set(1,.78,.65,.7);axis(0,.3,.7,1);axis(1,-.3,.7,-1);gatherGoal=-.38;driveGoal=1.85;noiseGoal=.82;detailGoal=1.15;break;
  case 'braid':set(0,.3,.42,.4);set(1,.7,.58,.6);set(2,.46,.28,.66);set(3,.54,.72,.33);axis(0,.7,.1,1);axis(1,.7,.1,1);axis(2,0,.7,-1);axis(3,0,.7,-1);gatherGoal=-.08;driveGoal=1.6;noiseGoal=.63;detailGoal=1.8;break;
+ case 'fold':{const diagonal=Math.random()<.5;set(0,.22,diagonal?.27:.72,.35);set(1,.78,diagonal?.73:.28,.65);set(2,.44,.64,.28);set(3,.56,.36,.72);axis(0,.4,.75,.35);axis(1,-.4,.75,-.35);axis(2,.8,.15,1);axis(3,-.8,.15,-1);gatherGoal=.025;driveGoal=1.35;noiseGoal=.52;detailGoal=1.3;break;}
+ case 'breathe':set(0,.27,.40,.38);set(1,.73,.60,.62);set(2,.36,.68,.62);set(3,.64,.32,.38);axis(0,.2,.4,1);axis(1,-.2,.4,-1);axis(2,.8,.5,.1);axis(3,-.8,.5,-.1);gatherGoal=.01;driveGoal=.76;noiseGoal=.40;detailGoal=.75;break;
  case 'burst':gatherGoal=-.13;driveGoal=1.65;noiseGoal=1.05;detailGoal=1.2;pulseCenter.copy((metrics?.mean||v(.5,.5,.5))).multiply(grid);pulse=2.1;break;
  }
 }
@@ -105,7 +112,16 @@ function direct(dt){
  const a=1-Math.exp(-dt*.17);
  for(let i=0;i<4;i++){origins[i].lerp(goals[i],a);axes[i].lerp(axisGoals[i],a*.65).normalize();}
  drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;palette+=(paletteGoal-palette)*a*.38;noise+=(noiseGoal-noise)*a;
- const u=sim.uniforms;u.vortexA.value.copy(origins[0]);u.vortexB.value.copy(origins[1]);u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
+ const u=sim.uniforms;
+ flowRate.lerp(flowRateGoal,1-Math.exp(-dt*.15));flowPhase.addScaledVector(flowRate,dt);
+ flowStrength+=(flowStrengthGoal-flowStrength)*(1-Math.exp(-dt*.22));
+ breathRate+=(breathRateGoal-breathRate)*(1-Math.exp(-dt*.11));breathPhase+=dt*breathRate;
+ const breath=Math.sin(breathPhase),breathing=state==='breathe'?1:.35;
+ u.flowPhase.value.copy(flowPhase);u.flowStrength.value=flowStrength*(.87+.13*breath);
+ u.breath.value=breath*breathing;
+ // Vortex centres drift continuously rather than settling into fixed positions.
+ const movingOrigin=(i)=>flowOffset.copy(origins[i]).add(v(Math.sin(flowPhase.x+i*1.63)*grid.x*.022,Math.cos(flowPhase.y+i*2.12)*grid.y*.028,Math.sin(flowPhase.z+i*2.43)*grid.z*.028));
+ u.vortexA.value.copy(movingOrigin(0));u.vortexB.value.copy(movingOrigin(1));u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  const m=metrics,compression=state==='gather'||rareKind===2;
  // The occupancy field, not the outer boundary, controls distribution.
  const fx=clamp((.24-(m?.spreadX??.24))*.018,-.0015,.0025);
@@ -118,11 +134,11 @@ function direct(dt){
    changeStudy(selectStudy(state,m,studyRecent));nextStudy=age+rand(28,65);
  }
  for(let i=0;i<5;i++){studyCurrent[i].lerp(studyGoal[i],1-Math.exp(-dt*.36));u.pigmentStops[i].value.copy(studyCurrent[i]);}
- u.vortexC.value.copy(origins[2]);u.vortexD.value.copy(origins[3]);u.axisC.value.copy(axes[2]);u.axisD.value.copy(axes[3]);
+ u.vortexC.value.copy(movingOrigin(2));u.vortexD.value.copy(movingOrigin(3));u.axisC.value.copy(axes[2]);u.axisD.value.copy(axes[3]);
  detail+=(detailGoal-detail)*a;u.detailForce.value=detail;
  if(age>=nextPulse){nextPulse=age+rand(17,37);if(state!=='rest'){pulseCenter.set(rand(.22,.78),rand(.22,.78),rand(.25,.75)).multiply(grid);pulse=rand(.8,1.8);}}
  pulse*=Math.exp(-dt*.85);u.pulse.value=pulse;u.pulseCenter.value.copy(pulseCenter);
- pace+=(paceGoal-pace)*(1-Math.exp(-dt*.32));conf.speed=pace;
+ pace+=(paceGoal-pace)*(1-Math.exp(-dt*.32));conf.speed=pace*(1+.09*breath);
  if(age>=nextTide){tideStart=age;tideDuration=rand(9,18);nextTide=age+tideDuration+rand(13,32);tideAxis.set(rand(-1,1),rand(-1,1),rand(-.35,.35)).normalize();tideStrength=rand(.24,.65);}
  const tideProgress=clamp((age-tideStart)/tideDuration,0,1);
  u.tideAxis.value.copy(tideAxis);u.tidePhase.value=-.85+tideProgress*1.7;u.tideAmount.value=Math.sin(Math.PI*tideProgress)*tideStrength;
@@ -131,9 +147,10 @@ function direct(dt){
  pointerStrength=pointerDown?1:0;
  pointerDelta.copy(pointerGoal);
  const click=pendingClick;pendingClick=0;
+ rippleAge=click>0?0:rippleAge+dt;u.rippleAge.value=Math.min(10,rippleAge);
  u.pointer.value.copy(pointer);u.pointerPrevious.value.copy(previousPointer);u.pointerDelta.value.copy(pointerDelta);
  u.pointerActive.value=pointerStrength;u.pointerDrag.value=dragDirty?1:0;
- u.clickImpulse.value=click;u.pointerPulse.value=Math.max(pointerPulse,click*2.6);u.clickCenter.value.copy(clickCenter);
+ u.clickImpulse.value=click;u.pointerPulse.value=Math.max(pointerPulse,click*1.8);u.clickCenter.value.copy(clickCenter);
  previousPointer.copy(pointer);pointerGoal.set(0,0,0);dragDirty=false;pointerPulse*=Math.exp(-dt*4.8);
  if(age>=nextNerve){nextNerve=age+rand(10,27);nerveSource.copy(metrics?.mean||v(.5,.5,.5)).add(v(rand(-.18,.18),rand(-.18,.18),rand(-.18,.18))).clampScalar(.08,.92).multiply(grid);nervePower=1;}
  nervePower*=Math.exp(-dt*.72);u.nerveSource.value.copy(nerveSource);u.nerveStrength.value=nervePower;
@@ -141,7 +158,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent=rareKind?rareNames[rareKind]:({gather:'condensing',unfold:'unfolding',divide:'dividing',orbit:'circulating',wall:'drifting',rest:'resting',shear:'shearing',braid:'weaving',burst:'expanding',wake:'awakening'}[state]||state);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent=rareKind?rareNames[rareKind]:({gather:'condensing',unfold:'unfolding',divide:'dividing',orbit:'circulating',wall:'drifting',rest:'resting',shear:'shearing',braid:'weaving',burst:'expanding',fold:'folding',breathe:'breathing',wake:'awakening'}[state]||state);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.sculptural,la=1-Math.exp(-dt*4);
@@ -199,7 +216,7 @@ async function loop(now){
    nextSample=age+1.8;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
    const revision=countRevision;
-   sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);if(!rareKind&&!pointerDown)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
+   sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);if(!rareKind&&!pointerDown&&rippleAge>2)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
   }
   perfFrames++;if(!perfStart)perfStart=now;
   if(now-perfStart>2200){
@@ -256,7 +273,7 @@ async function start(){
  resize();status.textContent='Initializing material field…';window.addEventListener('resize',resize);
  const canvas=renderer.domElement;
  function pointerPos(e){const rect=canvas.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);const p=v();if(!raycaster.ray.intersectPlane(plane,p))return pointer.clone();const xScale=sim.uniforms.screenScale.value,yScale=sim.uniforms.screenScaleY.value;return v(clamp(p.x*64/xScale+grid.x*.5,2,grid.x-2),clamp((p.y-.5)*64/yScale+grid.y*.5,2,grid.y-2),grid.z*.5);}
- canvas.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();pointerDown=true;pointer.copy(pointerPos(e));previousPointer.copy(pointer);clickCenter.copy(pointer);pointerGoal.set(0,0,0);pointerDelta.set(0,0,0);pendingClick=1.25;pointerPulse=2.8;dragDirty=false;lastPointerTime=performance.now();canvas.setPointerCapture(e.pointerId);});
+ canvas.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();pointerDown=true;pointer.copy(pointerPos(e));previousPointer.copy(pointer);clickCenter.copy(pointer);pointerGoal.set(0,0,0);pointerDelta.set(0,0,0);pendingClick=.48;pointerPulse=.95;dragDirty=false;lastPointerTime=performance.now();canvas.setPointerCapture(e.pointerId);});
  canvas.addEventListener('pointermove',e=>{if(!pointerDown)return;e.preventDefault();const p=pointerPos(e),now=performance.now(),dt=Math.max(.008,Math.min(.12,(now-lastPointerTime)/1000));pointerGoal.copy(p).sub(previousPointer).multiplyScalar(.022/dt).clampLength(0,3.0);pointer.copy(p);dragDirty=true;lastPointerTime=now;});
  const release=()=>{pointerDown=false;};
  canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);window.addEventListener('blur',release);

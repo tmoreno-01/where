@@ -135,6 +135,10 @@ class mlsMpmSimulator {
         this.uniforms.pointerPrevious = uniform(new THREE.Vector3());
         this.uniforms.pointerDrag = uniform(0.0);
         this.uniforms.clickImpulse = uniform(0.0);
+        this.uniforms.rippleAge=uniform(10.0);
+        this.uniforms.flowPhase=uniform(new THREE.Vector3());
+        this.uniforms.flowStrength=uniform(.19);
+        this.uniforms.breath=uniform(0.0);
         this.uniforms.pointerDelta = uniform(new THREE.Vector3());
         this.uniforms.pointerActive = uniform(0.0);
         this.uniforms.pointerPulse = uniform(0.0);
@@ -446,8 +450,12 @@ class mlsMpmSimulator {
             const tideCoord = normalizedPosition.dot(this.uniforms.tideAxis).sub(this.uniforms.tidePhase);
             const tideBand = float(1).sub(tideCoord.abs().mul(5.5)).clamp(0,1).pow(2);
             const tideForce = this.uniforms.tideAxis.mul(tideBand).mul(this.uniforms.tideAmount);
-            const filament = vec3(center.y.mul(0.14).add(center.z.mul(0.06)).add(time.mul(0.36)).sin(),center.z.mul(0.18).sub(center.x.mul(0.12)).sub(time.mul(0.24)).sin(),center.x.mul(0.12).add(center.y.mul(0.15)).add(time.mul(0.28)).sin()).mul(0.17);
-            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(spreadPush).add(this.uniforms.drift).add(balanceForce).mul(this.uniforms.dt));
+            const phase=this.uniforms.flowPhase;
+            // A slowly changing cross-axis flow field. Each component depends on
+            // the other two coordinates, avoiding global convergence into a point.
+            const filament = vec3(center.y.mul(.14).add(center.z.mul(.09)).add(phase.x).sin(),center.z.mul(.18).sub(center.x.mul(.11)).sub(phase.y).sin(),center.x.mul(.12).add(center.y.mul(.15)).add(phase.z).sin()).mul(this.uniforms.flowStrength);
+            const depthBreath=vec3(0,0,center.z.mul(.012).mul(this.uniforms.breath)).mul(spreadFade.z);
+            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(depthBreath).add(impulse).add(tideForce).add(restoring).add(spreadPush).add(this.uniforms.drift).add(balanceForce).mul(this.uniforms.dt));
 
             const cellIndex =  ivec3(particlePosition).sub(1).toConst("cellIndex");
             const cellDiff = particlePosition.fract().sub(0.5).toConst("cellDiff");
@@ -508,24 +516,32 @@ class mlsMpmSimulator {
             const dragLength=segment.length().toConst('dragLength');
             const dragUnit=segment.div(dragLength.max(0.001)).mul(vec3(float(1).div(this.uniforms.screenScale),float(1).div(this.uniforms.screenScaleY),0));
             const tangent=vec3(pUnit.y.negate(),pUnit.x,0);
-            const dragAmount=dragLength.mul(0.36).clamp(0,1.35);
-            const dragKick=dragUnit.mul(1.2).add(pUnit.mul(0.82)).add(tangent.mul(0.20)).mul(influence).mul(dragAmount).mul(this.uniforms.pointerDrag).toConst('dragKick');
+            const dragAmount=dragLength.mul(0.26).clamp(0,.88);
+            const dragKick=dragUnit.mul(.94).add(pUnit.mul(.48)).add(tangent.mul(.23)).mul(influence).mul(dragAmount).mul(this.uniforms.pointerDrag).toConst('dragKick');
             particleVelocity.addAssign(dragKick);
-            particleVelocity.addAssign(pUnit.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt).mul(0.32));
+            particleVelocity.addAssign(pUnit.mul(influence).mul(this.uniforms.pointerActive).mul(this.uniforms.dt).mul(0.18));
             const clickOffset = particlePosition.sub(this.uniforms.clickCenter).mul(vec3(this.uniforms.screenScale,this.uniforms.screenScaleY,0));
             const clickDist = clickOffset.length().max(0.18);
             const clickDir = clickOffset.div(clickDist).mul(vec3(float(1).div(this.uniforms.screenScale),float(1).div(this.uniforms.screenScaleY),0));
-            const clickWeight = float(1).sub(clickDist.div(13.5).pow(2)).clamp(0,1).pow(2);
+            const clickWeight = float(1).sub(clickDist.div(11.5).pow(2)).clamp(0,1).pow(2);
             const clickKick=clickDir.mul(clickWeight).mul(this.uniforms.clickImpulse).toConst('clickKick');
-            particleVelocity.addAssign(clickKick.mul(1.55));
+            particleVelocity.addAssign(clickKick.mul(1.05));
             // Apply a bounded positional impulse as well as momentum. This makes
             // the first rendered frame visibly respond even at a slow solver dt.
-            const directOffset=clickKick.mul(1.95).add(dragKick.mul(0.95)).toConst('directOffset');
+            const directOffset=clickKick.mul(1.15).add(dragKick.mul(.65)).toConst('directOffset');
+            // Immediate small displacement followed by a short, travelling pressure
+            // ripple; no prolonged pushing of the whole field.
+            const rippleAge=this.uniforms.rippleAge;
+            const rippleLife=float(1).sub(rippleAge.div(1.35)).clamp(0,1);
+            const rippleRadius=rippleAge.mul(10.5).add(1.0);
+            const rippleBand=float(1).sub(clickDist.sub(rippleRadius).abs().div(3.2)).clamp(0,1).pow(2);
+            const rippleForce=clickDir.mul(rippleBand.mul(rippleLife).mul(.42));
+            particleVelocity.addAssign(rippleForce.mul(this.uniforms.dt));
             const np=nervePos(particlePosition).toConst('nerveCell');
             const incoming=this.nerveNearby.element(nerveIndex(np)).toConst('incomingSignal');
             const sourceR=particlePosition.sub(this.uniforms.nerveSource);
             const source=float(1).sub(sourceR.length().div(10)).clamp(0,1).mul(this.uniforms.nerveStrength);
-            const contactSignal=influence.mul(this.uniforms.pointerActive).mul(0.6).add(clickWeight.mul(this.uniforms.pointerPulse).mul(0.15));
+            const contactSignal=influence.mul(this.uniforms.pointerActive).mul(.38).add(clickWeight.mul(this.uniforms.pointerPulse).mul(.24)).add(rippleBand.mul(rippleLife).mul(.12));
             const rareR=particlePosition.sub(this.uniforms.rareCenter);
             const rareDir=rareR.div(rareR.length().max(2));
             const rareWeight=float(1).div(float(1).add(rareR.dot(rareR).div(560)));
@@ -593,7 +609,7 @@ class mlsMpmSimulator {
             const speed = rawSpeed.div(rawSpeed.add(0.58)).clamp(0,1);
             const accel = particleVelocity.sub(prevVelocity).length().mul(1.8).clamp(0,1);
             const heading = particleVelocity.x.div(particleVelocity.length().max(0.001));
-            const contact = influence.mul(this.uniforms.pointerActive).mul(0.7).add(clickWeight.mul(this.uniforms.pointerPulse).mul(0.10));
+            const contact = influence.mul(this.uniforms.pointerActive).mul(.45).add(clickWeight.mul(this.uniforms.pointerPulse).mul(.10));
             const excitation = accel.mul(0.22).add(contact).add(tideBand.mul(this.uniforms.tideAmount.abs()).mul(0.15)).clamp(0,1);
             const retained = oldMemory.mul(float(1).sub(this.uniforms.dt.mul(0.018))).clamp(0,1);
             const memory = retained.add(excitation.mul(this.uniforms.dt).mul(0.18).mul(float(1).sub(retained))).clamp(0,1).mul(this.uniforms.memoryEnabled);

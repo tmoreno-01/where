@@ -8,7 +8,7 @@ const gridX = Math.round(Math.max(32,Math.min(120,initialAspect*60+4))/4)*4;
 const count=studio&&!q.has('quality')?(mobile?12000:200000):quality==='mobile'?12000:quality==='low'?24000:quality==='medium'?100000:quality==='high'?200000:quality==='extreme'&&!mobile?750000:300000;
 const shape=q.get('shape')==='spheres'?'spheres':q.get('shape')==='rods'?'rods':'capsules';
 export const conf = {
-  maxParticles:mobile?Math.max(studio?24000:60000,count):750000, particles:count, quality, mobile, studio, solver:q.get('solver')==='classic'?'classic':'fast', shape, spheres:shape==='spheres', capsules:shape==='capsules', densityOnly:q.get('color')==='density', paletteMode:({titanium:0,oil:1,oxidised:2,ultraviolet:3,glacier:4,gold:5,spectrum:6,acid:7,ember:8})[q.get('palette')]??-1, memory:q.get('memory')!=='off', nerves:q.get('nerves')!=='off', learn:q.get('learn')!=='off',
+  maxParticles:mobile?Math.max(studio?24000:60000,count):750000, particles:count, quality, mobile, studio, solver:q.get('solver')==='classic'?'classic':'fast', shape, spheres:shape==='spheres', capsules:shape==='capsules', densityOnly:!q.has('color')||q.get('color')==='density', paletteMode:({titanium:0,oil:1,oxidised:2,ultraviolet:3,glacier:4,gold:5,spectrum:6,acid:7,ember:8})[q.get('palette')]??-1, memory:q.get('memory')!=='off', nerves:q.get('nerves')!=='off', learn:q.get('learn')!=='off',
   gridX, gridY:64, gridZ:48,
   bloom:false, run:true, noise:0.80, speed:0.68, stiffness:3, restDensity:1,
   density:1.05, dynamicViscosity:0.12, gravity:0,
