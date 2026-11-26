@@ -76,7 +76,7 @@ float scene(vec3 p){
  structure=smin(structure,seams,.031);
  // Small windows cut through thicker junctions without erasing the armature.
  float cut=(abs(v2+v3*.32)-.22)/19.6;
- structure=smax(structure,-cut,.012*(1.-molten));
+ structure=smax(structure,-cut,.003+.009*(1.-molten));
  float body=smax(e,structure,.035);
  // Fluid exterior ridges welded to a local subset of the porous surface.
  float skin=abs(e+.022)-(.025+.052*molten);
