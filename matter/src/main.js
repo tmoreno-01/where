@@ -3,6 +3,7 @@ import Simulator from './mls-mpm/mlsMpmSimulator.js';
 import ParticleRenderer from './mls-mpm/particleRenderer.js';
 import {conf} from './conf.js';
 import {AdaptivePolicy} from './policy.js';
+import {compositionField,compositionMetrics} from './composition.js';
 import {paletteNames,paletteStops,selectStudy} from './palettes.js';
 const stage=document.querySelector('#stage'),status=document.querySelector('#status'),params=new URLSearchParams(location.search);
 const v=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z),rand=(a,b)=>a+(b-a)*Math.random(),clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
@@ -60,9 +61,10 @@ function light(name,color,intensity,pos,shadow=false){
  if(shadow){l.castShadow=true;l.shadow.mapSize.set(conf.particles>=200000?1024:1536,conf.particles>=200000?1024:1536);Object.assign(l.shadow.camera,{left:-2,right:2,top:1.4,bottom:-1.4,near:.02,far:6});l.shadow.camera.updateProjectionMatrix();l.shadow.bias=-.00035;l.shadow.normalBias=.0015;}
  return l;
 }
-const modes=['gather','unfold','divide','orbit','wall','rest','shear','braid','burst'];
+const modes=['gather','unfold','divide','orbit','rest','shear','braid','burst'];
 const policy=new AdaptivePolicy(modes,conf.learn), renderers=new Map();
-let requestedCount=conf.particles,countRevision=0,measuredFps=null;
+let requestedCount=conf.particles,countRevision=0,measuredFps=null,manualCount=false;
+let compositionGoal=Array.from({length:64},()=>[0,0]);
 let shadowMode=params.get('shadows')||'auto',shadowActive=false,renderCeiling=1,nextDiagnostic=0,slowWindows=0,fastWindows=0;
 const countFormat=new Intl.NumberFormat('en-GB');
 const nerveSource=v(),rareCenter=v(),rareAxis=v(1,0,0);
@@ -75,8 +77,8 @@ function rareEvent(kind){
 }
 function choose(){
  policy.finish();const m=metrics;
- const scores={gather:.40,unfold:1.5,divide:1.15,orbit:1,wall:.85,rest:0.45,shear:1.45,braid:1.4,burst:0.95};
- if(m){scores.gather+=clamp((m.spread-.43)*8,0,1.6);scores.unfold+=clamp((m.density-0.8)*2.4,0,2.8)+clamp((.26-Math.min(m.spreadX??.22,m.spreadY??.22))*16,0,3)+clamp((.60-(m.coverage??.5))*3,0,1.8);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.wall+=m.edge<.12?1.4:-.8;scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);}
+ const scores={gather:.15,unfold:1.75,divide:1.15,orbit:1,rest:.45,shear:1.45,braid:1.65,burst:.95};
+ if(m){scores.gather+=clamp((m.spread-.43)*8,0,1.6);scores.unfold+=clamp((m.density-0.8)*2.4,0,2.8)+clamp((.26-Math.min(m.spreadX??.22,m.spreadY??.22))*16,0,3)+clamp((.60-(m.coverage??.5))*3,0,1.8);scores.divide+=clamp((m.density-.65)*2,0,2);scores.orbit+=clamp((.8-m.speed)*2,0,2);scores.unfold+=clamp((.68-(m.coverage??.5))*4,0,2);scores.braid+=clamp(((m.edgeMass??.44)-.44)*5,0,2);scores.rest+=clamp((m.speed-1.7)*2.2,0,3)+m.edge*2;scores.burst+=clamp((1.0-m.speed)*2.8,0,3);scores.shear+=clamp((m.spread-.20)*5,0,2);scores.braid+=clamp((.65-m.density)*1.5,0,1);}
  for(const k of modes){scores[k]+=rand(0,.65)+policy.bonus(k,m);if(recent.includes(k))scores[k]-=1.5;if(k===state)scores[k]-=3;}
  const choice=forced&&modes.includes(forced)?forced:modes.reduce((a,b)=>scores[a]>scores[b]?a:b);
  recent.push(choice);if(recent.length>3)recent.shift();state=choice;stateSince=age;nextDecision=age+rand(12,30);policy.begin(choice,m,age);
@@ -87,40 +89,31 @@ function choose(){
  axis(2,rand(-1,1),rand(-1,1),rand(-1,1));axis(3,rand(-1,1),rand(-1,1),rand(-1,1));detailGoal=rand(.65,1.5);
  paceGoal=choice==='rest'?rand(.38,.49):choice==='burst'?rand(.83,.99):choice==='shear'||choice==='braid'?rand(.69,.82):rand(.49,.69);
  switch(choice){
- case 'gather':set(0,.40,.44,.47);set(1,.60,.56,.52);axis(0,.2,.1,1);axis(1,.1,.4,1);gatherGoal=.47;driveGoal=.66;noiseGoal=.43;break;
- case 'unfold':set(0,.12,.24,.47);set(1,.88,.76,.53);axis(0,.2,.1,1);axis(1,.1,.2,-1);gatherGoal=-.57;driveGoal=1.35;noiseGoal=.98;break;
+ case 'gather':set(0,.40,.44,.47);set(1,.60,.56,.52);axis(0,.2,.1,1);axis(1,.1,.4,1);gatherGoal=.18;driveGoal=.66;noiseGoal=.43;break;
+ case 'unfold':set(0,.12,.24,.47);set(1,.88,.76,.53);axis(0,.2,.1,1);axis(1,.1,.2,-1);gatherGoal=-.08;driveGoal=1.35;noiseGoal=.98;break;
  case 'divide':{const vertical=Math.random()<.4;set(0,vertical?.48:.20,vertical?.19:.48,.33);set(1,vertical?.52:.80,vertical?.81:.52,.69);axis(0,0,.3,1);axis(1,.2,0,-1);gatherGoal=-.18;driveGoal=1.55;noiseGoal=.55;break;}
  case 'orbit':set(0,.37,.50,.35);set(1,.63,.50,.65);axis(0,rand(-.4,.4),rand(-.4,.4),1);axis(1,rand(-.4,.4),rand(-.4,.4),1);gatherGoal=.02;driveGoal=1.5;noiseGoal=.75;break;
  case 'wall':{const side=Math.floor(rand(0,4));wallTarget.set(side===0?.06:side===1?.94:rand(.24,.76),side===2?.06:side===3?.94:rand(.25,.75),.5);set(0,wallTarget.x,wallTarget.y,.37);set(1,wallTarget.x,wallTarget.y,.66);axis(0,0,0,1);axis(1,.15,.1,-1);gatherGoal=-.12;driveGoal=1.08;noiseGoal=.52;break;}
  case 'rest':set(0,.44,.50,.40);set(1,.56,.50,.60);axis(0,.2,1,.2);axis(1,.2,1,-.2);gatherGoal=.02;driveGoal=.40;noiseGoal=.35;detailGoal=.38;break;
  case 'shear':set(0,.22,.35,.3);set(1,.78,.65,.7);axis(0,.3,.7,1);axis(1,-.3,.7,-1);gatherGoal=-.38;driveGoal=1.85;noiseGoal=.82;detailGoal=1.15;break;
  case 'braid':set(0,.3,.42,.4);set(1,.7,.58,.6);set(2,.46,.28,.66);set(3,.54,.72,.33);axis(0,.7,.1,1);axis(1,.7,.1,1);axis(2,0,.7,-1);axis(3,0,.7,-1);gatherGoal=-.08;driveGoal=1.6;noiseGoal=.63;detailGoal=1.8;break;
- case 'burst':gatherGoal=-.7;driveGoal=1.65;noiseGoal=1.05;detailGoal=1.2;pulseCenter.copy((metrics?.mean||v(.5,.5,.5))).multiply(grid);pulse=2.1;break;
+ case 'burst':gatherGoal=-.13;driveGoal=1.65;noiseGoal=1.05;detailGoal=1.2;pulseCenter.copy((metrics?.mean||v(.5,.5,.5))).multiply(grid);pulse=2.1;break;
  }
 }
 function direct(dt){
  if(age>=nextDecision)choose();
- if(state==='wall'){
-  const f=clamp((age-stateSince)/3,0,1),m=metrics?.mean||v(.5,.5,.5);
-  driftGoal.set(clamp((wallTarget.x-m.x)*.62,-.34,.34),clamp((wallTarget.y-m.y)*.62,-.34,.34),0).multiplyScalar(f);
-  if(metrics&&metrics.edge>.27){driftGoal.multiplyScalar(-.65);nextDecision=Math.min(nextDecision,age+3);}
- }
  const a=1-Math.exp(-dt*.17);
  for(let i=0;i<4;i++){origins[i].lerp(goals[i],a);axes[i].lerp(axisGoals[i],a*.65).normalize();}
  drift.lerp(driftGoal,a);drive+=(driveGoal-drive)*a;gather+=(gatherGoal-gather)*a;palette+=(paletteGoal-palette)*a*.38;noise+=(noiseGoal-noise)*a;
  const u=sim.uniforms;u.vortexA.value.copy(origins[0]);u.vortexB.value.copy(origins[1]);u.axisA.value.copy(axes[0]);u.axisB.value.copy(axes[1]);u.drive.value=drive;u.palette.value=palette;u.gather.value=gather;u.drift.value.copy(drift);conf.noise=noise;
  const m=metrics,compression=state==='gather'||rareKind===2;
- const targetSpread=compression ? .205 : .285;
- const sx=m?.spreadX??.215,sy=m?.spreadY??.205;
- const fx=clamp(.004+(targetSpread-sx)*.085,-.003,.018),fy=clamp(.005+(targetSpread-sy)*.10,-.003,.020);
- spreadForce.lerp(v(fx,fy,0),1-Math.exp(-dt*.23));
- spreadCenter.lerp((m?.mean||v(.5,.5,.5)).clone().multiply(grid),1-Math.exp(-dt*.22));
+ // The occupancy field, not the outer boundary, controls distribution.
+ const fx=clamp((.24-(m?.spreadX??.24))*.018,-.0015,.0025);
+ const fy=clamp((.24-(m?.spreadY??.24))*.018,-.0015,.0025);
+ spreadForce.lerp(v(fx,fy,0),1-Math.exp(-dt*.30));spreadCenter.copy(grid).multiplyScalar(.5);
  u.spreadForce.value.copy(spreadForce);u.spreadCenter.value.copy(spreadCenter);
- // Slowly re-balance empty sides without imposing constant uniform coverage.
- const sides=m?.sides||[.06,.06,.06,.06];
- const bx=compression?0:clamp((sides[0]-sides[1])*.62,-.095,.095);
- const by=compression?0:clamp((sides[2]-sides[3])*.62,-.095,.095);
- edgeBias.lerp(v(bx,by,0),1-Math.exp(-dt*.18));u.edgeBias.value.copy(edgeBias);
+ const blend=1-Math.exp(-dt*.55);
+ for(let i=0;i<64;i++){const p=sim.compositionVectors[i],q=compositionGoal[i];p.x+=(q[0]-p.x)*blend;p.y+=(q[1]-p.y)*blend;}
  if(conf.paletteMode<0&&age>=nextStudy&&!rareKind){
    changeStudy(selectStudy(state,m,studyRecent));nextStudy=age+rand(28,65);
  }
@@ -148,7 +141,7 @@ function direct(dt){
  if(rareKind&&age-rareStart>=rareDuration)rareKind=0;
  const rareEnvelope=rareKind?Math.sin(Math.PI*clamp((age-rareStart)/rareDuration,0,1)):0;
  u.rareKind.value=rareKind;u.rareStrength.value=rareEnvelope;u.rareCenter.value.copy(rareCenter);u.rareAxis.value.copy(rareAxis);
- if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent=rareKind?rareNames[rareKind]:({gather:'condensing',unfold:'unfolding',divide:'dividing',orbit:'circulating',wall:'drifting',rest:'resting',shear:'shearing',braid:'weaving',burst:'expanding',wake:'awakening'}[state]||state);document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
+ if(age>=nextDiagnostic){nextDiagnostic=age+.35;document.querySelector('#studyName').textContent=paletteNames[activeStudy];document.querySelector('#publicState').textContent=rareKind?rareNames[rareKind]:({gather:'condensing',unfold:'unfolding',divide:'dividing',orbit:'circulating',wall:'drifting',rest:'resting',shear:'shearing',braid:'weaving',burst:'expanding',wake:'awakening'}[state]||state);document.querySelector('#coverageReadout').textContent=metrics?Math.round((metrics.occupied??0)*100)+'%':'—';document.querySelector('#diagnostic').textContent=state+' · '+policy.total+' learned · '+(rareKind?rareNames[rareKind]:'signal '+Math.round((metrics?.signal||0)*100)+'%')+(measuredFps===null?'':' · '+Math.round(measuredFps)+' fps')+' · '+(shadowActive?'shadows':'no shadows');}
  lightMood+=(lightGoal-lightMood)*(1-Math.exp(-dt*.05));
  const activity=clamp((metrics?.speed||.8)/2,0,1);
  const look=lightingPresets[lightingMode]||lightingPresets.sculptural,la=1-Math.exp(-dt*4);
@@ -194,7 +187,7 @@ async function loop(now){
  const dt=previous?Math.min((now-previous)/1000,.033):1/60;previous=now;age+=dt;
  try{
   if(requestedCount!==conf.particles){
-   conf.particles=requestedCount;conf.updateParams();updateVisibleBounds();countRevision++;metrics=null;
+   conf.particles=requestedCount;conf.updateParams();updateVisibleBounds();countRevision++;metrics=null;compositionGoal=Array.from({length:64},()=>[0,0]);
    policy.begin(state,null,age);nextSample=age+.5;
    if(shadowMode==='auto'&&conf.particles>=200000)setShadows(false);
   }
@@ -203,16 +196,16 @@ async function loop(now){
   if(renderer.backend.device?.queue)await renderer.backend.device.queue.onSubmittedWorkDone();
   if(frame++===0){status.hidden=true;stage.classList.add('ready');if(conf.studio&&window.parent!==window)window.parent.postMessage({type:'matter:ready'},location.origin);}
   if(age>=nextSample&&!observing&&!senseError&&frame>3){
-   nextSample=age+3.5;observing=true;
+   nextSample=age+1.8;observing=true;
    // Queue the compact telemetry dispatch before scheduling the next simulation.
    const revision=countRevision;
-   sim.observe().then(m=>{if(m&&revision===countRevision){metrics=m;if(!rareKind&&!pointerDown)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
+   sim.observe().then(m=>{if(m&&revision===countRevision){Object.assign(m,compositionMetrics(m.distribution));metrics=m;compositionGoal=compositionField(m.distribution);if(!rareKind&&!pointerDown)policy.observe(m,age);}}).catch(e=>{senseError=true;console.warn('Telemetry unavailable',e);}).finally(()=>{observing=false;});
   }
   perfFrames++;if(!perfStart)perfStart=now;
   if(now-perfStart>2200){
    const fps=perfFrames*1000/(now-perfStart);measuredFps=fps;
    if(fps<42){slowWindows++;fastWindows=0;}else if(fps>56){fastWindows++;slowWindows=0;}else{slowWindows=0;fastWindows=0;}
-   if(slowWindows>=2){if(shadowMode==='auto'&&shadowActive)setShadows(false);else if(ratio>.65){ratio=Math.max(.65,ratio-.10);resize();}else if(conf.studio&&fps<34&&requestedCount>(conf.mobile?6000:60000)){requestedCount=Math.max(conf.mobile?6000:60000,Math.round(requestedCount*.82/1000)*1000);document.querySelector('#particleCount').value=String(requestedCount);document.querySelector('#particleCountLabel').textContent=countFormat.format(requestedCount);}slowWindows=0;}
+   if(slowWindows>=2){if(shadowMode==='auto'&&shadowActive)setShadows(false);else if(ratio>.65){ratio=Math.max(.65,ratio-.10);resize();}else if(conf.studio&&!manualCount&&fps<34&&requestedCount>(conf.mobile?6000:60000)){requestedCount=Math.max(conf.mobile?6000:60000,Math.round(requestedCount*.82/1000)*1000);document.querySelector('#particleCount').value=String(requestedCount);document.querySelector('#particleCountLabel').textContent=countFormat.format(requestedCount);}slowWindows=0;}
    if(fastWindows>=5&&ratio<renderCeiling){ratio=Math.min(renderCeiling,ratio+.05);resize();fastWindows=0;}
    perfFrames=0;perfStart=now;
   }
@@ -243,7 +236,7 @@ async function start(){
  const countSlider=document.querySelector('#particleCount'),countLabel=document.querySelector('#particleCountLabel');
  countSlider.min='5000';countSlider.max=String(conf.maxParticles);countSlider.step='1000';countSlider.value=String(conf.particles);
  countLabel.textContent=countFormat.format(conf.particles);
- countSlider.oninput=()=>{requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
+ countSlider.oninput=()=>{manualCount=true;requestedCount=clamp(Math.round(Number(countSlider.value)/1000)*1000,5000,conf.maxParticles);countLabel.textContent=countFormat.format(requestedCount);};
  shapeSelect.onchange=()=>{const shape=shapeSelect.value;if(shape===conf.shape)return;particles.object.visible=false;if(!renderers.has(shape)){const next=new ParticleRenderer(sim,shape);scene.add(next.object);renderers.set(shape,next);}particles=renderers.get(shape);particles.setFinish(finishMode);particles.object.visible=true;conf.shape=shape;particles.setChamberScale(sim.uniforms.screenScale.value,sim.uniforms.screenScaleY.value);updateVisibleBounds();particles.update();};
  paletteSelect.onchange=()=>{conf.paletteMode=Number(paletteSelect.value);if(conf.paletteMode>=0)changeStudy(conf.paletteMode);else {changeStudy(selectStudy(state,metrics,studyRecent));nextStudy=age+rand(28,65);}};
  colorSelect.onchange=()=>{sim.uniforms.colorMix.value=Number(colorSelect.value);};
@@ -268,10 +261,10 @@ async function start(){
  const release=()=>{pointerDown=false;};
  canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);window.addEventListener('blur',release);
  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();else schedule();});
- document.querySelector('#pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'resume':'pause';if(paused)stop();else schedule();};
+ document.querySelector('#pause').onclick=e=>{paused=!paused;const button=e.currentTarget;button.setAttribute('aria-label',paused?'Resume':'Pause');button.setAttribute('aria-pressed',String(paused));button.querySelector('.pause-icon').textContent=paused?'▶':'Ⅱ';if(paused)stop();else schedule();};
  document.querySelector('#new').onclick=()=>location.reload();
  document.querySelector('#full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{}};
- document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h'&&!/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))document.body.classList.toggle('lab');if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();document.querySelector('#pause').click();}});
+ document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='h'&&!/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))document.body.classList.toggle('lab');if(e.code==='Space'&&!/BUTTON|INPUT|SELECT|TEXTAREA/.test(e.target.tagName)){e.preventDefault();document.querySelector('#pause').click();}});
  if(params.has('clean'))document.body.classList.add('clean');
  if(params.has('lab'))document.body.classList.add('lab');
  if(conf.studio){
@@ -282,7 +275,7 @@ async function start(){
  window.matterPause=()=>{paused=true;stop();};
  window.matterResume=()=>{paused=false;schedule();};
  const dev=renderer.backend.device;if(dev?.lost)dev.lost.then(info=>{stop();fail(Error(info.message||'Graphics device lost.'));});
- document.querySelector('#labToggle').onclick=()=>document.body.classList.toggle('lab');
+ document.querySelector('#labToggle').onclick=e=>{const show=document.body.classList.toggle('lab');e.currentTarget.setAttribute('aria-expanded',String(show));};
  window.sculptureStatus=()=>({palette:paletteNames[activeStudy],frame,age,particles:conf.particles,requestedCount,maxParticles:conf.maxParticles,fps:measuredFps,solver:conf.solver,shadows:shadowActive,backend:'WebGPU',pixelRatio:ratio,paused,state,metrics:metrics?{...metrics,mean:metrics.mean.toArray()}:null,telemetryAvailable:!senseError,pointerActive:pointerDown,speedRef,pace,memory:conf.memory,quality:conf.quality,shape:conf.shape,learning:policy.snapshot(),rare:rareNames[rareKind],rareCount,lighting:lightingMode,brightness,visibleFraction,fieldShadows:fieldShadowMode,finish:finishMode});
  schedule();
 }

@@ -1,5 +1,5 @@
 const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
-const key='matter-policy-v2';
+const key='matter-policy-v3';
 export class AdaptivePolicy {
  constructor(modes,enabled=true){this.modes=modes;this.enabled=enabled;this.table={};this.history=[];this.active=null;this.total=0;this.lastReward=null;this.lastNovelty=0;
  if(enabled)try{const old=JSON.parse(localStorage.getItem(key)||'null');if(old?.version===1){for(const [k,v] of Object.entries(old.table||{}))if(/^[a-z]+:[a-z]+$/.test(k)&&Number.isFinite(v.n)&&Number.isFinite(v.q))this.table[k]={n:clamp(v.n,0,100000),q:clamp(v.q)};this.total=clamp(Number(old.total)||0,0,100000);}}catch{}}
@@ -11,8 +11,8 @@ export class AdaptivePolicy {
  const dist=(a,b)=>a.reduce((s,x,i)=>s+Math.abs(x-b[i]),0)*.5;
  const novelty=this.history.length?Math.min(...this.history.map(h=>dist(m.distribution,h))):.5;
  this.lastNovelty=novelty;this.history.push(m.distribution.slice());if(this.history.length>18)this.history.shift();
- const contrast=clamp(m.densityContrast*.8),motion=clamp(m.speedContrast*.9),balance=clamp(1-Math.abs(m.entropy-.85)*2.7),spread=clamp(1-Math.abs(Math.min(m.spreadX??.22,m.spreadY??.22)-.27)*5),coverage=clamp((m.coverage??.5)/.75),walls=clamp((m.edge-.52)*2),edgeVar=m.sides?m.sides.filter(x=>x>.018).length/4:.5;
- const reward=clamp(.19*contrast+.15*motion+.16*balance+.15*spread+.12*coverage+.10*edgeVar+.13*clamp(novelty*3)-.18*walls);
+ const contrast=clamp(m.densityContrast*.8),motion=clamp(m.speedContrast*.9),balance=clamp(1-Math.abs(m.entropy-.85)*2.7),spread=clamp(1-Math.abs(Math.min(m.spreadX??.22,m.spreadY??.22)-.27)*5),coverage=clamp((m.coverage??.5)/.75),walls=clamp(((m.edgeMass??.44)-.46)*2.5),interior=clamp((m.interior??.56)/.57),occupied=m.occupied??coverage;
+ const reward=clamp(.12*contrast+.12*motion+.15*balance+.10*spread+.24*occupied+.15*interior+.12*clamp(novelty*3)-.34*walls);
  if(Number.isFinite(reward))this.active.values.push(reward);
  }
  finish(){const a=this.active;this.active=null;if(!this.enabled||!a||!a.values.length)return;

@@ -19,7 +19,7 @@ import {
     mat3,
     clamp,
     time,
-    cross, mix, mx_hsvtorgb, select, ivec3
+    cross, mix, mx_hsvtorgb, select, ivec3, uniformArray
 } from "three/tsl";
 import {triNoise3Dvec} from "../common/noise.js";
 import {conf} from "../conf.js";
@@ -61,16 +61,13 @@ class mlsMpmSimulator {
         this.particleBuffer = new StructuredArray(particleStruct, maxParticles, "particleData");
 
         const vec = new THREE.Vector3();
-        const initialExtent=new THREE.Vector3(.95,.91,.65),initialMax=this.gridSize.clone().subScalar(2.02);
+        const initialMax=this.gridSize.clone().subScalar(2.02);
         for (let i = 0; i < maxParticles; i++) {
-            let dist = 2;
-            while (dist > 1) {
-                vec.set(Math.random(),Math.random(),Math.random()).multiplyScalar(2.0).subScalar(1.0);
-                dist = vec.length();
-                vec.multiply(initialExtent).addScalar(1.0).divideScalar(2.0).multiply(this.gridSize);
-                vec.clampScalar(2.02,Infinity);
-                vec.min(initialMax);
-            }
+            // A broad, non-uniform starting field; no single central sphere.
+            const x=Math.random()*.84+.08,y=Math.random()*.84+.08;
+            const ridge=.5+.17*Math.sin(x*8.5+y*5.3)+.09*Math.cos(y*12-x*4);
+            const z=Math.max(.12,Math.min(.88,ridge+(Math.random()-.5)*.45));
+            vec.set(x,y,z).multiply(this.gridSize).clampScalar(2.02,Infinity).min(initialMax);
             const mass = 1.0 - Math.random() * 0.002;
             this.particleBuffer.set(i, "position", vec);
             this.particleBuffer.set(i, "mass", mass);
@@ -131,6 +128,8 @@ class mlsMpmSimulator {
         this.uniforms.paletteMode = uniform(conf.paletteMode);
         this.uniforms.pigmentStops=Array.from({length:5},()=>uniform(new THREE.Vector3(.1,.2,.3)));
         this.uniforms.edgeBias=uniform(new THREE.Vector3());
+        this.compositionVectors=Array.from({length:64},()=>new THREE.Vector3());
+        this.uniforms.compositionField=uniformArray(this.compositionVectors,'vec3');
         this.uniforms.edgeTargets=uniform(new THREE.Vector4(1,1,1,1));
         this.uniforms.pointer = uniform(new THREE.Vector3());
         this.uniforms.pointerPrevious = uniform(new THREE.Vector3());
@@ -421,20 +420,26 @@ class mlsMpmSimulator {
             const rb = particlePosition.sub(this.uniforms.vortexB).toConst();
             const wa = float(1).div(float(1).add(ra.dot(ra).div(230))).toConst();
             const wb = float(1).div(float(1).add(rb.dot(rb).div(280))).toConst();
-            const spinA = cross(this.uniforms.axisA,ra).mul(0.048).sub(ra.mul(0.008)).mul(wa);
-            const spinB = cross(this.uniforms.axisB,rb).mul(0.048).sub(rb.mul(0.008)).mul(wb);
+            const spinA = cross(this.uniforms.axisA,ra).mul(0.048).sub(ra.mul(0.0018)).mul(wa);
+            const spinB = cross(this.uniforms.axisB,rb).mul(0.048).sub(rb.mul(0.0018)).mul(wb);
             const rc = particlePosition.sub(this.uniforms.vortexC).toConst();
             const rd = particlePosition.sub(this.uniforms.vortexD).toConst();
             const wc = float(1).div(float(1).add(rc.dot(rc).div(125))).toConst();
             const wd = float(1).div(float(1).add(rd.dot(rd).div(145))).toConst();
-            const spinC = cross(this.uniforms.axisC,rc).mul(0.105).sub(rc.mul(0.012)).mul(wc);
-            const spinD = cross(this.uniforms.axisD,rd).mul(0.095).sub(rd.mul(0.009)).mul(wd);
+            const spinC = cross(this.uniforms.axisC,rc).mul(0.105).sub(rc.mul(0.003)).mul(wc);
+            const spinD = cross(this.uniforms.axisD,rd).mul(0.095).sub(rd.mul(0.003)).mul(wd);
             const center = particlePosition.sub(vec3(this.uniforms.gridSize).mul(0.5));
             // Broad screen-space expansion; keep depth coherent while permitting brief compression.
-            const restoring = center.mul(vec3(this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.008).sub(0.0009),this.uniforms.gather.mul(-0.009).sub(0.005)));
+            const restoring = center.mul(vec3(this.uniforms.gather.mul(-0.0018),this.uniforms.gather.mul(-0.0018),this.uniforms.gather.mul(-0.004).sub(0.004)));
             const boundaryDistance=particlePosition.sub(this.uniforms.visibleMin).min(this.uniforms.visibleMax.sub(particlePosition));
             const spreadFade=boundaryDistance.div(1.8).clamp(0,1);
-            const spreadPush=particlePosition.sub(this.uniforms.spreadCenter).mul(this.uniforms.spreadForce).clamp(-0.56,0.56).mul(spreadFade);
+            const spreadPush=particlePosition.sub(this.uniforms.spreadCenter).mul(this.uniforms.spreadForce).clamp(-0.22,0.22).mul(spreadFade);
+            const uv=particlePosition.sub(this.uniforms.visibleMin).div(this.uniforms.visibleMax.sub(this.uniforms.visibleMin).max(.001)).clamp(0,1);
+            const tile=uv.mul(7).toConst('compositionTile');
+            const ix=int(tile.x.floor()),iy=int(tile.y.floor());
+            const ix1=ix.add(1).min(7),iy1=iy.add(1).min(7);
+            const lookup=(x,y)=>this.uniforms.compositionField.element(uint(y.mul(8).add(x)));
+            const balanceForce=mix(mix(lookup(ix,iy),lookup(ix1,iy),tile.x.fract()),mix(lookup(ix,iy1),lookup(ix1,iy1),tile.x.fract()),tile.y.fract()).toConst('balanceForce');
             const pulseR = particlePosition.sub(this.uniforms.pulseCenter);
             const impulse = pulseR.div(pulseR.length().max(2.0)).mul(this.uniforms.pulse).div(float(1).add(pulseR.dot(pulseR).div(380)));
             const normalizedPosition = particlePosition.div(vec3(this.uniforms.gridSize)).sub(0.5);
@@ -442,7 +447,7 @@ class mlsMpmSimulator {
             const tideBand = float(1).sub(tideCoord.abs().mul(5.5)).clamp(0,1).pow(2);
             const tideForce = this.uniforms.tideAxis.mul(tideBand).mul(this.uniforms.tideAmount);
             const filament = vec3(center.y.mul(0.14).add(center.z.mul(0.06)).add(time.mul(0.36)).sin(),center.z.mul(0.18).sub(center.x.mul(0.12)).sub(time.mul(0.24)).sin(),center.x.mul(0.12).add(center.y.mul(0.15)).add(time.mul(0.28)).sin()).mul(0.17);
-            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(spreadPush).add(this.uniforms.drift).add(this.uniforms.edgeBias).mul(this.uniforms.dt));
+            particleVelocity.addAssign(spinA.add(spinB).mul(this.uniforms.drive).add(spinC.add(spinD).mul(this.uniforms.detailForce)).add(filament).add(impulse).add(tideForce).add(restoring).add(spreadPush).add(this.uniforms.drift).add(balanceForce).mul(this.uniforms.dt));
 
             const cellIndex =  ivec3(particlePosition).sub(1).toConst("cellIndex");
             const cellDiff = particlePosition.fract().sub(0.5).toConst("cellDiff");
@@ -536,14 +541,14 @@ class mlsMpmSimulator {
             const rareForce=select(kind.equal(2),lens,select(kind.equal(3),split,vec3(0))).mul(rare);
             particleVelocity.addAssign(twitch.add(rareForce).mul(this.uniforms.dt));
             // A broad soft collision layer prevents planar accumulation.
-            const margin=vec3(1.7,1.7,4.0);
+            const margin=vec3(3.0,3.0,4.0);
             const edgeLow=this.uniforms.visibleMin.add(margin).sub(particlePosition).div(margin).clamp(0,1);
             const edgeHigh=particlePosition.sub(this.uniforms.visibleMax.sub(margin)).div(margin).clamp(0,1);
             const edgeNormal=edgeLow.mul(edgeLow).sub(edgeHigh.mul(edgeHigh));
-            particleVelocity.addAssign(edgeNormal.mul(1.9).mul(this.uniforms.dt));
+            particleVelocity.addAssign(edgeNormal.mul(2.4).mul(this.uniforms.dt));
             const outwardLow=particleVelocity.min(0).mul(edgeLow.mul(edgeLow));
             const outwardHigh=particleVelocity.max(0).mul(edgeHigh.mul(edgeHigh));
-            particleVelocity.subAssign(outwardLow.add(outwardHigh).mul(.15));
+            particleVelocity.subAssign(outwardLow.add(outwardHigh).mul(.09));
             const boundaryCurl=vec3(edgeNormal.y.mul(particlePosition.z.mul(.16).add(time.mul(.12)).sin()),edgeNormal.x.mul(particlePosition.z.mul(.18).sub(time.mul(.13)).cos()),edgeNormal.x.add(edgeNormal.y).mul(particlePosition.y.mul(.12).sin())).mul(.31);
             particleVelocity.addAssign(boundaryCurl.mul(this.uniforms.dt));
             // Recent disturbance slightly changes local mobility; slowly relaxes back.
@@ -558,12 +563,12 @@ class mlsMpmSimulator {
             const lo=wallMin.sub(particlePosition).max(0).toConst('wallLo');
             const hi=particlePosition.sub(wallMax).max(0).toConst('wallHi');
             particlePosition.addAssign(lo.sub(hi).mul(1.65));
-            If(lo.x.greaterThan(0),()=>{particleVelocity.x.assign(particleVelocity.x.abs().mul(.48).max(.28));});
-            If(hi.x.greaterThan(0),()=>{particleVelocity.x.assign(particleVelocity.x.abs().mul(-.48).min(-.28));});
-            If(lo.y.greaterThan(0),()=>{particleVelocity.y.assign(particleVelocity.y.abs().mul(.48).max(.28));});
-            If(hi.y.greaterThan(0),()=>{particleVelocity.y.assign(particleVelocity.y.abs().mul(-.48).min(-.28));});
-            If(lo.z.greaterThan(0),()=>{particleVelocity.z.assign(particleVelocity.z.abs().mul(.48).max(.28));});
-            If(hi.z.greaterThan(0),()=>{particleVelocity.z.assign(particleVelocity.z.abs().mul(-.48).min(-.28));});
+            If(lo.x.greaterThan(0),()=>{particleVelocity.x.assign(particleVelocity.x.abs().mul(.72).max(.55));});
+            If(hi.x.greaterThan(0),()=>{particleVelocity.x.assign(particleVelocity.x.abs().mul(-.72).min(-.55));});
+            If(lo.y.greaterThan(0),()=>{particleVelocity.y.assign(particleVelocity.y.abs().mul(.72).max(.55));});
+            If(hi.y.greaterThan(0),()=>{particleVelocity.y.assign(particleVelocity.y.abs().mul(-.72).min(-.55));});
+            If(lo.z.greaterThan(0),()=>{particleVelocity.z.assign(particleVelocity.z.abs().mul(.72).max(.55));});
+            If(hi.z.greaterThan(0),()=>{particleVelocity.z.assign(particleVelocity.z.abs().mul(-.72).min(-.55));});
             particlePosition.assign(clamp(particlePosition,wallMin,wallMax));
 
             this.particleBuffer.element(instanceIndex).get('position').assign(particlePosition)
