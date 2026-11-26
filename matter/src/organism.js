@@ -34,7 +34,7 @@ export class Organism {
      c.q[k][a]+=(result-c.q[k][a])*Math.max(.10,1/n);this.learned++;
     }
     // 0 restore / 1 clockwise / 2 counter-clockwise / 3 relay
-    const prior=context===0?[.23,.04,.04,.17]:context===1?[.01,.16,.16,.22]:[.06,.13,.13,.16];
+    const prior=context===0?[.16,.12,.12,.18]:context===1?[.06,.16,.16,.18]:[.08,.16,.16,.17];
     const scores=prior.map((p,a)=>p+(learn?c.q[context][a]-.5+.22/Math.sqrt(1+c.n[context][a]):0)+this.random()*.14-(a===c.action?.12:0));
     c.action=scores.indexOf(Math.max(...scores));c.ctx=context;c.base=quality(c.p,c.s,c.signal);
     c.deadline=age+3.5+this.random()*5.5;
