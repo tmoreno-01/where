@@ -1,4 +1,4 @@
-import {Collective} from './collective.js?v=9';
+import {Collective} from './collective.js?v=10';
 import * as THREE from 'three';
 import RAPIER from 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.17.3/rapier.es.js';
 const V=(p)=>new THREE.Vector3(p.x??p[0],p.y??p[1],p.z??p[2]),Q=q=>new THREE.Quaternion(q.x??q[0],q.y??q[1],q.z??q[2],q.w??q[3]);

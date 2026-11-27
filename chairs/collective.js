@@ -9,20 +9,21 @@ export class Collective {
   if(t>=this.next){this.epoch++;this.next=t+12+this.rng()*18;const modes=['fold','braid','divide','gather'];const choices=modes.filter(x=>x!==this.mode);this.mode=choices[Math.floor(this.rng()*choices.length)];this.axis=[Math.cos(this.phase*.67),.35*Math.sin(this.phase*.9),Math.sin(this.phase*.67)];}
   const out=new Map();if(!points.length)return out;
   const centre=[0,0,0],mean=[0,0,0];for(const s of points){for(let k=0;k<3;k++){centre[k]+=s.p[k];mean[k]+=s.v[k];}}for(let k=0;k<3;k++){centre[k]/=points.length;mean[k]/=points.length;}
-  const grid=new Map(),size=1.35;for(const s of points){const cell=s.p.map(x=>Math.floor(x/size));s.cell=cell;const k=hash(...cell);if(!grid.has(k))grid.set(k,[]);grid.get(k).push(s);}
+  const grid=new Map(),size=1.65;for(const s of points){const cell=s.p.map(x=>Math.floor(x/size));s.cell=cell;const k=hash(...cell);if(!grid.has(k))grid.set(k,[]);grid.get(k).push(s);}
   const phase=this.phase,ax=Math.cos(phase*.33),az=Math.sin(phase*.33),wave=.5+.5*Math.sin(phase*.7);
   let density=0;
   for(const s of points){
    const [x,y,z]=s.p,[vx,vy,vz]=s.v,[ix,iy,iz]=s.cell;let n=0,w=0,cx=0,cy=0,cz=0,mx=0,my=0,mz=0,rx=0,ry=0,rz=0,signal=0;
-   for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++)for(let k=-1;k<=1;k++){const cell=grid.get(hash(ix+i,iy+j,iz+k));if(!cell)continue;for(const b of cell){if(b===s)continue;const dx=b.p[0]-x,dy=b.p[1]-y,dz=b.p[2]-z,r=mag(dx,dy,dz);if(r>1.65||r<1e-5)continue;const q=1-r/1.65;n++;w+=q;cx+=dx*q;cy+=dy*q;cz+=dz*q;mx+=(b.v[0]-vx)*q;my+=(b.v[1]-vy)*q;mz+=(b.v[2]-vz)*q;signal+=(b.signal||0)*q;if(r<.43){const f=(.43-r)/r;rx-=dx*f;ry-=dy*f;rz-=dz*f;}}}
+   for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++)for(let k=-1;k<=1;k++){const cell=grid.get(hash(ix+i,iy+j,iz+k));if(!cell)continue;for(const b of cell){if(b===s)continue;const dx=b.p[0]-x,dy=b.p[1]-y,dz=b.p[2]-z,r=mag(dx,dy,dz);if(r>1.65||r<1e-5)continue;const q=1-r/1.65;n++;w+=q;cx+=dx*q;cy+=dy*q;cz+=dz*q;mx+=(b.v[0]-vx)*q;my+=(b.v[1]-vy)*q;mz+=(b.v[2]-vz)*q;signal+=(b.signal||0)*q;if(r<1.03){const f=(1.03-r)/r;rx-=dx*f;ry-=dy*f;rz-=dz*f;}}}
    density+=n;const den=Math.max(.25,w),px=x-centre[0],py=y-centre[1],pz=z-centre[2],rad=mag(px,py,pz),projection=px*ax+pz*az;
    // Dense regions rotate, thin regions seek the nearest material. A travelling
    // wave reverses circulation through the pile, coupling distant neighbourhoods.
    const localPhase=phase+projection*.65+py*.32,drive=Math.sin(localPhase),side=Math.tanh(projection*1.15);
-   const densityDrive=clamp((n-3)/9,0,1),social=clamp(signal/den,0,1),trait=s.trait||.5;
-   let fx=cx/den*(.85+.36*(1-densityDrive))+mx/den*.52+rx*.8,
-       fy=cy/den*(.85+.36*(1-densityDrive))+my/den*.52+ry*.8,
-       fz=cz/den*(.85+.36*(1-densityDrive))+mz/den*.52+rz*.8;
+   const densityDrive=clamp((n-5)/12,0,1),social=clamp(signal/den,0,1),trait=s.trait||.5;
+   const attract=.16+.52*(1-densityDrive),pressure=.65+1.1*densityDrive;
+   let fx=cx/den*attract+mx/den*.52+rx*pressure,
+       fy=cy/den*attract+my/den*.52+ry*pressure,
+       fz=cz/den*attract+mz/den*.52+rz*pressure;
    // Continuous field, not keyframed positions. The different flows compete
    // with contact forces and with the local alignment response.
    const circulation=(.24+.34*drive+.16*social)*(this.mode==='braid'?1.45:1);
@@ -32,8 +33,8 @@ export class Collective {
    if(this.mode==='fold'){fx+=az*Math.sin(py*.8+phase)*.54;fz-=ax*Math.sin(py*.8+phase)*.54;}
    if(this.mode==='braid'){fy+=side*.46*Math.cos(phase*.8);fx+=az*side*.23;fz-=ax*side*.23;}
    // Keep one cohesive, suspended installation; centre restoring force is soft.
-   const targetY=3.05+.24*Math.sin(phase*.45),radius=points.length>150?2.45:1.85;
-   const outside=Math.max(0,rad-radius);const restore=.12+outside*.48;
+   const targetY=3.05+.24*Math.sin(phase*.45),radius=points.length>150?3.0:2.25;
+   const outside=Math.max(0,rad-radius);const restore=.05+outside*.31;
    fx-=px*restore;fy-=py*restore;fz-=pz*restore;
    fx-=centre[0]*.46+mean[0]*.26;fy+=(targetY-centre[1])*.72-mean[1]*.27;fz-=centre[2]*.46+mean[2]*.26;
    if(y<.72)fy+=(.72-y)*2.8;

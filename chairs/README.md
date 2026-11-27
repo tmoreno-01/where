@@ -4,3 +4,5 @@ Live collision events now maintain a contact graph for selection and physical jo
 
 ## Floating collective / revision 09
 Zero gravity throughout. All compound chairs participate in a continuously sampled spatial-neighbourhood field with density, velocity alignment, contact signals, four changing flow regimes, and soft confinement. Persistent contacts can create temporary physical bonds. Reconstruction departs tangentially with inherited momentum, staggered disassembly and force-driven docking. No position keyframes. Flow regimes are procedural, not a learned neural model; construction still uses adaptive heuristic policies and compatible parts. No browser physics or visual validation has been completed for this revision.
+
+Revision 10: local pressure increases with neighbourhood density, with a wider repulsive radius and weaker long-range compression. Point-field proxy tests cover 60 seconds with both populations; these are not rigid-body or GPU tests.
