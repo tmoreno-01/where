@@ -9,7 +9,7 @@ export class Colony{
  // Loose starting layers are physically dropped rather than frozen into an overlapping grid.
  const p=[(x-(side-1)*.5)*.91+R(-.09,.09),.72+layer*1.13+R(0,.12),(z-(side-1)*.5)*.91+R(-.09,.09)];
  const a={id:i,style,scale,color,p,rot:[R(-Math.PI,Math.PI),R(-Math.PI,Math.PI),R(-Math.PI,Math.PI)],partScales:Array(6).fill(scale),partIds:Array.from({length:6},(_,j)=>i*6+j),partColors:Array.from({length:6},()=>clamp(color+R(-.075,.075),0,.99999)),temper:R(.2,1),cool:R(0,5),visits:0,job:null,parts:null,links:[],tone:R(-.055,.055)};
- this.agents.push(a);}}
+ a.partTones=Array(6).fill(a.tone);this.agents.push(a);}}
  disturb(p){this.focus=p.slice();this.focusUntil=this.clock+14;}
  snapshot(){return {chairs:this.agents.length,moving:this.jobs.length,events:{...this.events}};}
 }

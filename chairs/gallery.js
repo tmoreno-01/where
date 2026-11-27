@@ -17,5 +17,5 @@ export async function loadWood(models){
  const diffuse=maps[0].value;diffuse.colorSpace=THREE.SRGBColorSpace;
  const normal=maps[1].status==='fulfilled'?maps[1].value:null,rough=maps[2].status==='fulfilled'?maps[2].value:null;
  for(const t of [diffuse,normal,rough].filter(Boolean)){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=8;t.repeat.set(1,1);}
- for(const m of new Set(models.map(m=>m.mat))){m.map=diffuse;if(normal){m.normalMap=normal;m.normalScale.set(.23,.23);m.bumpMap=null;}if(rough)m.roughnessMap=rough;m.roughness=.68;m.clearcoatRoughness=.29;m.needsUpdate=true;}return true;
+ for(const m of new Set(models.map(m=>m.mat))){m.map=diffuse;if(normal){m.normalMap=normal;m.normalScale.set(.23,.23);m.bumpMap=null;}if(rough)m.roughnessMap=rough;m.roughness=Math.min(.9,m.roughness+.12);m.clearcoatRoughness=.29;m.needsUpdate=true;}return true;
 }
