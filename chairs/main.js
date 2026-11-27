@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
-import {Colony} from './colony.js?v=1';
+import {Colony} from './colony.js?v=2';
 import {chairModels,facade} from './models.js?v=1';
 const $=id=>document.getElementById(id),stage=$('stage'),status=$('status');
 const mobile=matchMedia('(pointer:coarse)').matches||innerWidth<700,COUNT=mobile?360:760;
@@ -13,7 +13,7 @@ const palette=['#55351f','#83502b','#a16b39','#c18c4b','#6c4329','#bb9565','#412
 const textile=['#80392a','#8c7850','#4e5b43','#b08c68','#4b3e35','#a39c84'].map(c=>new THREE.Color(c));
 const smooth=t=>t*t*(3-2*t),mix=(a,b,t)=>a+(b-a)*t;
 function pose(a){const j=a.job;if(!j){return {p:colony.position(a.site),r:a.rot};}const t=Math.min(1,j.age/j.duration),s=smooth(t),lift=Math.sin(Math.PI*t);return {p:[mix(j.from[0],j.to[0],s),mix(j.from[1],j.to[1],s)+lift*.45,mix(j.from[2],j.to[2],s)+lift*(j.lift-Math.max(j.from[2],j.to[2]))],r:j.rot.map((v,i)=>mix(v,j.endRot[i],s)+Math.sin(t*Math.PI*2)*.22)};}
-function colorFor(a,p){const n=a.partColors[p],base=palette[Math.min(palette.length-1,Math.floor(a.color*palette.length))];return col.copy(base).lerp(palette[Math.min(palette.length-1,Math.floor(n*palette.length))],.36);}
+function colorFor(a,p){return col.copy(palette[Math.min(palette.length-1,Math.floor(a.partColors[p]*palette.length))]);}
 function transform(a,p,model){
  const ap=pose(a);pos.set(...ap.p);quat.setFromEuler(euler.set(...ap.r));scale.setScalar(a.scale);
  const ex=a.exchange;
@@ -26,7 +26,7 @@ function transform(a,p,model){
  mat.compose(pos,quat,scale);return mat;
 }
 function setupInstances(){const models=chairModels();groups=models.map((model,style)=>{const list=colony.agents.filter(a=>a.style===style);const parts=model.parts.map(part=>{const m=new THREE.InstancedMesh(part.geo,model.mat,list.length);m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.castShadow=true;m.receiveShadow=true;m.frustumCulled=false;scene.add(m);return m;});let pad=null;if(model.pad){pad=new THREE.InstancedMesh(model.pad,model.cloth,list.length);pad.instanceMatrix.setUsage(THREE.DynamicDrawUsage);pad.castShadow=true;pad.receiveShadow=true;pad.frustumCulled=false;scene.add(pad);}return {model,list,parts,pad};});}
-function updateInstances(){for(const g of groups){for(let i=0;i<g.list.length;i++){const a=g.list[i];for(let p=0;p<6;p++){g.parts[p].setMatrixAt(i,transform(a,p,g.model));const ex=a.exchange;let colorAgent=a;if(ex&&ex.part===p&&ex.age/ex.duration>.5)colorAgent=ex.a===a?ex.b:ex.a;g.parts[p].setColorAt(i,colorFor(colorAgent,p));}if(g.pad){g.pad.setMatrixAt(i,transform(a,0,g.model));g.pad.setColorAt(i,textile[Math.floor(a.color*textile.length)%textile.length]);}}for(const m of g.parts){m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true;}if(g.pad){g.pad.instanceMatrix.needsUpdate=true;g.pad.instanceColor.needsUpdate=true;}}}
+function updateInstances(){for(const g of groups){for(let i=0;i<g.list.length;i++){const a=g.list[i];for(let p=0;p<6;p++){g.parts[p].setMatrixAt(i,transform(a,p,g.model));g.parts[p].setColorAt(i,colorFor(a,p));}if(g.pad){g.pad.setMatrixAt(i,transform(a,0,g.model));g.pad.setColorAt(i,textile[Math.floor(a.color*textile.length)%textile.length]);}}for(const m of g.parts){m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true;}if(g.pad){g.pad.instanceMatrix.needsUpdate=true;g.pad.instanceColor.needsUpdate=true;}}}
 function resize(){if(!renderer)return;const w=Math.max(1,stage.clientWidth),h=Math.max(1,stage.clientHeight);renderer.setPixelRatio(quality);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();if(paused&&!dead){controls.update();renderer.render(scene,camera);}}
 function stop(){cancelAnimationFrame(raf);raf=0;last=0;perf=0;perfFrames=0;}
 function schedule(){if(!raf&&!paused&&!dead&&visible&&!document.hidden)raf=requestAnimationFrame(loop);}
