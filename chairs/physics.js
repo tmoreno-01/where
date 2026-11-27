@@ -4,9 +4,9 @@ const V=(p)=>new THREE.Vector3(p.x??p[0],p.y??p[1],p.z??p[2]),Q=q=>new THREE.Qua
 const I=()=>new THREE.Quaternion(),rot=(x,y,z)=>new THREE.Quaternion().setFromEuler(new THREE.Euler(x,y,z)),R=(a,b)=>a+Math.random()*(b-a),clamp=(x,a,b)=>Math.max(a,Math.min(b,x)),key=s=>s.join(',');
 export const initPhysics=()=>RAPIER.init();
 export class PhysicsColony{
- constructor(colony,models,mobile){this.colony=colony;this.models=models;this.mobile=mobile;this.acc=0;this.clock=0;this.active=[];this.events={arrivals:0,disassemblies:0,reassemblies:0,collisions:0,reroutes:0,grafts:0,completedGrafts:0,layouts:[0,0,0,0]};this.policy={branch:{q:.5,n:0},bridge:{q:.5,n:0},repair:{q:.5,n:0},excavate:{q:.5,n:0}};this.mode='branch';this.world=new RAPIER.World({x:0,y:0,z:0});this.world.timestep=1/60;this.world.integrationParameters.numSolverIterations=5;this.world.integrationParameters.maxCcdSubsteps=2;this.queue=new RAPIER.EventQueue(true);this.colliders=new Map();this.build();}
+ constructor(colony,models,mobile){this.colony=colony;this.models=models;this.mobile=mobile;this.acc=0;this.clock=0;this.active=[];this.links=[];this.nextFront=0;this.front=null;this.settling=5;this.events={arrivals:0,disassemblies:0,reassemblies:0,collisions:0,reroutes:0,grafts:0,completedGrafts:0,links:0,breaks:0,layouts:[0,0,0,0]};this.policy={branch:{q:.5,n:0},bridge:{q:.5,n:0},repair:{q:.5,n:0},excavate:{q:.5,n:0}};this.mode='branch';this.world=new RAPIER.World({x:0,y:-9.81,z:0});this.world.timestep=1/60;this.world.integrationParameters.numSolverIterations=6;this.world.integrationParameters.maxCcdSubsteps=2;this.queue=new RAPIER.EventQueue(true);this.colliders=new Map();this.build();}
  dispose(){this.queue.free();this.world.free();}
- build(){this.staticBox([0,-.25,0],[1000,.25,1000]); for(const a of this.colony.agents){a.layout=this.standard(a);a.layoutKind=0;a.body=this.makeWhole(a,V(this.colony.position(a.site)),rot(...a.rot),false);a.parts=null;this.events.layouts[0]++;}}
+ build(){this.staticBox([0,-.25,0],[1000,.25,1000]);for(const a of this.colony.agents){a.layout=this.standard(a);a.layoutKind=0;a.body=this.makeWhole(a,V(a.p),rot(...a.rot),true);a.body.setLinearDamping(.32);a.body.setAngularDamping(.65);a.parts=null;this.events.layouts[0]++;}}
  staticBox(p,h){const b=this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(...p));this.world.createCollider(RAPIER.ColliderDesc.cuboid(...h).setFriction(.65),b);}
  standard(a){return this.models[a.style].parts.map(p=>({p:p.anchor.clone(),q:I()}));}
  // Persistent alternate assemblies: open radial ribs, ladder bridges and split fins.
@@ -27,42 +27,83 @@ export class PhysicsColony{
  return s;}
  body(p,q,dynamic){let d=(dynamic?RAPIER.RigidBodyDesc.dynamic():RAPIER.RigidBodyDesc.fixed()).setTranslation(p.x,p.y,p.z).setRotation(q);if(dynamic)d=d.setLinearDamping(2.2).setAngularDamping(3.2).setCcdEnabled(true);return this.world.createRigidBody(d);}
  addPartColliders(a,body,index,localP,localQ){const model=this.models[a.style],part=model.parts[index],geos=[part.geo];if(index===0&&model.pad)geos.push(model.pad);
- for(const g of geos)for(const c of g.userData.colliders){const partScale=a.partScales[index];const h=c.h.map(x=>Math.max(.008,x*partScale*.96)),p=V(c.p).sub(part.anchor).multiplyScalar(partScale).applyQuaternion(localQ).add(localP),q=localQ.clone().multiply(Q(c.q));const desc=RAPIER.ColliderDesc.cuboid(...h).setTranslation(p.x,p.y,p.z).setRotation(q).setDensity(4).setFriction(.62).setRestitution(.12).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);const co=this.world.createCollider(desc,body);this.colliders.set(co.handle,a.id);}}
+ for(const g of geos)for(const c of g.userData.colliders){const partScale=a.partScales[index];const h=c.h.map(x=>Math.max(.008,x*partScale*.96)),p=V(c.p).sub(part.anchor).multiplyScalar(partScale).applyQuaternion(localQ).add(localP),q=localQ.clone().multiply(Q(c.q));const desc=RAPIER.ColliderDesc.cuboid(...h).setTranslation(p.x,p.y,p.z).setRotation(q).setDensity(4).setFriction(.78).setRestitution(.06).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);const co=this.world.createCollider(desc,body);this.colliders.set(co.handle,a.id);}}
  makeWhole(a,p,q,dynamic){const b=this.body(p,q,dynamic);a.layout.forEach((l,i)=>this.addPartColliders(a,b,i,l.p.clone().multiplyScalar(a.scale),l.q));return b;}
  remove(b){for(let i=0;i<b.numColliders();i++)this.colliders.delete(b.collider(i).handle);this.world.removeRigidBody(b);}
  partWorld(a,i){if(a.parts){const b=a.parts[i];return {p:V(b.translation()),q:Q(b.rotation())};}const b=a.body,l=a.layout[i],q=Q(b.rotation());return {p:l.p.clone().multiplyScalar(a.scale).applyQuaternion(q).add(V(b.translation())),q:q.multiply(l.q)};}
- start(a,forceSplit=false){const j=a.job,split=forceSplit||Math.random()<.88;const q=Q(a.body.rotation()),p=V(a.body.translation());j.physical={age:0,stage:0,origin:p.clone(),goal:V(j.to),goalQ:rot(...j.endRot),lift:j.lift,split,kind:a.layoutKind,stable:0,reroutes:0,mode:this.mode,route:[],grafted:0};const ph=j.physical;
- if(split){const old=a.layoutKind;ph.kind=this.mode==='repair'&&Math.random()<.65?0:this.mode==='bridge'?2:this.mode==='branch'?1+Math.floor(Math.random()*3):Math.random()<.22?0:3;if(ph.kind===old)ph.kind=(old+1)%4;ph.layout=this.layout(a,ph.kind);const initial=a.layout.map((_,i)=>this.partWorld(a,i));this.remove(a.body);a.body=null;a.parts=initial.map((x,i)=>{const b=this.body(x.p,x.q,true);this.addPartColliders(a,b,i,new THREE.Vector3(),I());b.applyImpulse(x.p.clone().sub(p).normalize().multiplyScalar(b.mass()*.28),true);return b;});this.events.disassemblies++;ph.route=a.parts.map(b=>V(b.translation()));}
- else{a.body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);a.body.setLinearDamping(2.2);a.body.setAngularDamping(3.2);a.body.enableCcd(true);}
+ start(a,forceSplit=false){this.unlink(a);const j=a.job,split=forceSplit||Math.random()<.88;const q=Q(a.body.rotation()),p=V(a.body.translation());j.physical={age:0,stage:0,origin:p.clone(),goal:V(j.to),goalQ:rot(...j.endRot),lift:j.lift,split,kind:a.layoutKind,stable:0,reroutes:0,mode:this.mode,route:[],grafted:0,flight:0};const ph=j.physical;
+ if(split){const old=a.layoutKind;ph.kind=this.mode==='repair'&&Math.random()<.65?0:this.mode==='bridge'?2:this.mode==='branch'?1+Math.floor(Math.random()*3):Math.random()<.22?0:3;if(ph.kind===old)ph.kind=(old+1)%4;ph.layout=this.layout(a,ph.kind);const initial=a.layout.map((_,i)=>this.partWorld(a,i));this.remove(a.body);a.body=null;a.parts=initial.map((x,i)=>{const b=this.body(x.p,x.q,true);this.addPartColliders(a,b,i,new THREE.Vector3(),I());b.setGravityScale(0,true);b.applyImpulse(x.p.clone().sub(p).normalize().multiplyScalar(b.mass()*.28),true);return b;});this.events.disassemblies++;ph.route=a.parts.map(b=>V(b.translation()));}
+ else{a.body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);a.body.setLinearDamping(2.2);a.body.setAngularDamping(3.2);a.body.enableCcd(true);a.body.setGravityScale(0,true);}
  this.active.push(a);}
  graft(a,b){if(!a.parts||!b.parts||a.style!==b.style)return;const indices=[1,2,3,4,5];const count=Math.random()<.40?2:1;for(let n=0;n<count;n++){const i=indices.splice(Math.random()*indices.length|0,1)[0];[a.parts[i],b.parts[i]]=[b.parts[i],a.parts[i]];for(const field of ['partScales','partColors','partIds'])[a[field][i],b[field][i]]=[b[field][i],a[field][i]];for(const x of [a,b]){x.job.physical.route[i]=V(x.parts[i].translation());x.job.physical.grafted++;for(let k=0;k<x.parts[i].numColliders();k++)this.colliders.set(x.parts[i].collider(k).handle,x.id);}this.events.grafts+=2;}}
  steer(body,p,q,speed=1.8){const delta=p.clone().sub(V(body.translation())),desired=delta.multiplyScalar(3.5);if(desired.length()>speed)desired.setLength(speed);const dv=desired.sub(V(body.linvel())).multiplyScalar(.27*body.mass());body.applyImpulse(dv,true);
  const current=Q(body.rotation()),err=q.clone().multiply(current.invert());if(err.w<0)err.set(-err.x,-err.y,-err.z,-err.w);const angle=2*Math.acos(clamp(err.w,-1,1)),axis=new THREE.Vector3(err.x,err.y,err.z);if(axis.lengthSq()>1e-10)axis.normalize().multiplyScalar(Math.min(3.4,angle*3.5));const av=V(body.angvel()).lerp(axis,.30);body.setAngvel(av,true);}
  reached(body,p,q,tol=.17){return V(body.translation()).distanceTo(p)<tol&&V(body.linvel()).length()<.30&&Q(body.rotation()).angleTo(q)<.45;}
  targetPart(a,i,center,q){const l=a.job.physical.layout[i];return {p:l.p.clone().multiplyScalar(a.scale).applyQuaternion(q).add(center),q:q.clone().multiply(l.q)};}
- // New goals are exterior vacant sites. No forced teleport or timed snap.
- reroute(a){const j=a.job,ph=j.physical;let best=null,score=-1e9;for(let k=0;k<240;k++){const b=this.colony.agents[Math.random()*this.colony.count|0];if(b.job)continue;const ns=this.colony.neighbours(b.site),s=ns[Math.random()*6|0],kk=key(s);if(!this.colony.valid(s)||this.colony.occupied.has(kk)||this.colony.reserved.has(kk)||s[1]<1)continue;const n=this.colony.degree(s);if(n<1||n>2)continue;const p=V(this.colony.position(s)),v=p.y*.20-p.distanceTo(ph.goal)*.09+R(0,1);if(v>score){score=v;best=s;}}
- if(!best)return;this.colony.reserved.delete(key(j.target));j.target=best;j.to=this.colony.position(best);this.colony.reserved.add(key(best));ph.goal=V(j.to);ph.origin=a.parts?this.partWorld(a,0).p:V(a.body.translation());ph.lift=Math.max(ph.origin.y,ph.goal.y)+2.0;ph.route=a.parts?a.parts.map(b=>V(b.translation())):[];ph.age=0;ph.stage=0;ph.stable=0;ph.reroutes++;this.events.reroutes++;}
- updateJob(a,dt){const j=a.job,ph=j.physical;ph.age+=dt;
- // Travel in three physical stages: detach outward, translate in free space,
- // then approach the destination. Stage progression uses simulated positions.
+ // Decisions are based on the current simulated pile, not a cell grid.
+ unlink(a){for(const l of this.links.filter(l=>l.a===a||l.b===a)){this.world.removeImpulseJoint(l.joint,true);this.events.breaks++;}this.links=this.links.filter(l=>l.a!==a&&l.b!==a);}
+ position(a){return a.parts?V(a.parts[0].translation()):V(a.body.translation());}
+ neighbours(a,all,r=1.15){const p=this.position(a);return all.filter(b=>b!==a&&this.position(b).distanceToSquared(p)<r*r);}
+ chooseFront(all){const choices=Object.entries(this.policy).map(([k,v])=>({k,s:v.q+.45/Math.sqrt(v.n+1)+R(0,.36)-(k===this.mode?.13:0)})).sort((a,b)=>b.s-a.s);this.mode=choices[0].k;
+ const c=this.colony,focus=c.focusUntil>c.clock?V(c.focus):null;
+ const exposed=all.filter(a=>this.neighbours(a,all,1.05).length<8);
+ const root=(exposed.length?exposed:all)[Math.random()*(exposed.length||all.length)|0];
+ const base=focus||this.position(root),angle=R(0,Math.PI*2),dir=new THREE.Vector3(Math.cos(angle),0,Math.sin(angle));
+ if(base.y<.7)base.y=.7;
+ this.front={base,dir,serial:0};this.nextFront=this.clock+R(14,29);}
+ choose(all,style=null,near=null){let best=null,score=-1e9;const candidates=all.filter(a=>!a.job&&a.cool<=0&&(style===null||a.style===style));for(let i=0;i<Math.min(65,candidates.length);i++){const a=candidates[Math.random()*candidates.length|0],p=this.position(a),n=this.neighbours(a,all,1.1).length;
+ const distance=near?p.distanceTo(near):p.distanceTo(this.front.base);const s=(9-n)*.45+p.y*.21-distance*.24+R(0,1)-Math.min(a.visits*.12,1.2);if(s>score){score=s;best=a;}}return best;}
+ plan(a,all){const f=this.front,p=this.position(a),slot=f.serial++,sign=slot%2?1:-1,rank=Math.floor(slot/2)%5;
+ // Shared front develops a branch, bridge or repairing cluster across successive jobs.
+ const side=new THREE.Vector3(-f.dir.z,0,f.dir.x);let goal=f.base.clone().addScaledVector(f.dir,sign*(.55+rank*.42)).addScaledVector(side,R(-.22,.22));
+ if(this.mode==='branch')goal.y+=.65+rank*.38;
+ else if(this.mode==='bridge')goal.y+=.55+Math.sin(rank*.8)*.2;
+ else if(this.mode==='excavate'){goal.addScaledVector(side,sign*.8);goal.y+=.4;}
+ else goal.y+=.26;
+ // Build above nearby material rather than steer through the solid pile.
+ let roof=.45;for(const b of all){if(b===a||b.job)continue;const q=this.position(b);if(Math.hypot(q.x-goal.x,q.z-goal.z)<.69)roof=Math.max(roof,q.y);}
+ goal.y=Math.max(goal.y,roof+.58);goal.y=Math.min(goal.y,7.3);
+ const az=Math.atan2(f.dir.x,f.dir.z),angle=this.mode==='bridge'?R(1.0,1.7):R(-.8,.8);
+ a.job={to:goal.toArray(),endRot:[angle,az+R(-.5,.5),R(-.9,.9)],lift:Math.max(p.y,goal.y)+R(.7,1.25)};a.visits++;}
+ updateJob(a,dt){const ph=a.job.physical;ph.age+=dt;ph.flight+=dt;
  const centre=ph.stage===0?new THREE.Vector3(ph.origin.x,ph.lift,ph.origin.z):ph.stage===1?new THREE.Vector3(ph.goal.x,ph.lift,ph.goal.z):ph.goal.clone();
- let ready=true;
- if(a.parts){for(let i=0;i<6;i++){const target=this.targetPart(a,i,centre,ph.goalQ);if(ph.stage<2){const theta=i*Math.PI*2/6+a.id*.618;const spread=.52+.28*Math.sin(a.id*1.6);if(ph.stage===0){const src=ph.route[i];target.p.x=src.x;target.p.z=src.z;target.p.y=Math.max(ph.lift,src.y+1.8);}target.p.add(new THREE.Vector3(Math.cos(theta)*spread,Math.sin(theta*2)*.23,Math.sin(theta)*spread));}else if(i>0){const wait=Math.max(0,1-ph.age/(.8+i*.35));target.p.add(new THREE.Vector3(0,wait*.65,0));}this.steer(a.parts[i],target.p,target.q,ph.stage===2?.95:2.0);if(!this.reached(a.parts[i],target.p,target.q,ph.stage===2?.14:.28))ready=false;}}
- else{this.steer(a.body,centre,ph.goalQ,ph.stage===2?.95:2.0);ready=this.reached(a.body,centre,ph.goalQ,ph.stage===2?.17:.32);}
- if(ready)ph.stable+=dt;else ph.stable=0;
- if(ph.stable>.16){if(ph.stage<2){ph.stage++;ph.stable=0;ph.age=0;}else return true;}
- if(ph.age>12){if(ph.stage<2){ph.stage++;ph.age=0;ph.stable=0;}else{const p=this.policy[ph.mode];p.n++;p.q+=(0-p.q)*.18;this.reroute(a);ph.age=0;}}return false;}
- finish(a){const j=a.job,ph=j.physical;
- if(a.parts){const actual=a.parts.map(b=>({p:V(b.translation()),q:Q(b.rotation())}));const center=ph.goal.clone(),q=ph.goalQ.clone(),inv=q.clone().invert();this.events.layouts[a.layoutKind]--;a.layoutKind=ph.kind;this.events.layouts[a.layoutKind]++;
- // Preserve exact solved part poses when welding; only change the physics
- // representation from independent rigid bodies to a single compound.
- a.layout=actual.map(t=>({p:t.p.clone().sub(center).applyQuaternion(inv).divideScalar(a.scale),q:inv.clone().multiply(t.q)}));a.parts.forEach(b=>this.remove(b));a.parts=null;a.body=this.makeWhole(a,center,q,false);this.events.reassemblies++;this.events.completedGrafts+=ph.grafted;}
- else{a.body.setLinvel({x:0,y:0,z:0},true);a.body.setAngvel({x:0,y:0,z:0},true);a.body.setBodyType(RAPIER.RigidBodyType.Fixed,true);}
- this.colony.reserved.delete(key(j.target));a.site=j.target;a.job=null;a.cool=R(1,5);this.colony.occupied.set(key(a.site),a);this.colony.events.moves++;this.events.arrivals++;const p=this.policy[ph.mode];p.n++;p.q+=(Math.max(.15,1-ph.reroutes*.18)-p.q)*.18;}
- tick(dt,activity){this.clock+=dt;const c=this.colony;c.clock+=dt;if(c.clock>c.regionTime){this.mode=Object.keys(this.policy).map(k=>({k,s:this.policy[k].q+.42/Math.sqrt(1+this.policy[k].n)+R(0,.35)-(k===this.mode?.12:0)})).sort((a,b)=>b.s-a.s)[0].k;c.mode=this.mode;const angle=R(0,Math.PI*2);c.direction=[Math.cos(angle),0,Math.sin(angle)];c.region=c.focusUntil>c.clock?c.focus.slice():[R(-4.5,4.5),R(2,8.5),R(-3,3)];c.regionTime=c.clock+R(15,35);}for(const a of c.agents)a.cool=Math.max(0,a.cool-dt*activity);
- const cap=Math.max(3,Math.round((this.mobile?6:15)*activity));if(this.active.length<cap&&Math.random()<dt*4.0*activity){const old=c.jobs.length;c.chooseMove();if(c.jobs.length>old){const a=c.jobs[c.jobs.length-1];const pair=this.active.length+2<=cap&&Math.random()<.58;if(pair){const n=c.jobs.length;c.chooseMove(a.style);if(c.jobs.length>n){const b=c.jobs[c.jobs.length-1];this.start(a,true);this.start(b,true);this.graft(a,b);}else this.start(a);}else this.start(a);}}
- const done=[];for(const a of this.active)if(this.updateJob(a,dt))done.push(a);this.world.step(this.queue);this.queue.drainCollisionEvents((h1,h2,started)=>{if(started&&this.colliders.get(h1)!==this.colliders.get(h2))this.events.collisions++;});for(const a of done)this.finish(a);this.active=this.active.filter(a=>a.job);c.jobs=this.active;}
+ let ready=true,maxErr=0;
+ if(a.parts){for(let i=0;i<6;i++){const target=this.targetPart(a,i,centre,ph.goalQ);
+ if(ph.stage<2){const theta=i*Math.PI/3+a.id*.618;if(ph.stage===0){const src=ph.route[i];target.p.set(src.x,Math.max(ph.lift,src.y+.7),src.z);}const spread=.50+.13*Math.sin(a.id);target.p.add(new THREE.Vector3(Math.cos(theta)*spread,Math.sin(theta*2)*.13,Math.sin(theta)*spread));}
+ else if(i>0){const wait=Math.max(0,1-ph.age/(.45+i*.22));target.p.y+=wait*.60;}
+ const b=a.parts[i];this.steer(b,target.p,target.q,ph.stage===2?.82:1.65);maxErr=Math.max(maxErr,V(b.translation()).distanceTo(target.p));if(!this.reached(b,target.p,target.q,ph.stage===2?.19:.30))ready=false;}}
+ else{this.steer(a.body,centre,ph.goalQ,ph.stage===2?.8:1.7);maxErr=V(a.body.translation()).distanceTo(centre);ready=this.reached(a.body,centre,ph.goalQ,.22);}
+ ph.stable=ready?ph.stable+dt:0;
+ if(ph.stable>.12||(ph.stage<2&&ph.age>5.5)){if(ph.stage<2){ph.stage++;ph.age=0;ph.stable=0;}else return true;}
+ // If parts cannot fit, adjust the target; do not teleport them or force a weld.
+ if(ph.stage===2&&ph.age>7){if(maxErr<.30)return true;ph.goal.y+=.30;ph.age=0;ph.reroutes++;this.events.reroutes++;if(ph.reroutes>2){ph.kind=0;ph.layout=this.standard(a);ph.goal.y+=.35;}}
+ // Recovery still uses real contacts, but avoids leaving a broken job forever.
+ if(ph.flight>40&&ph.stage===2&&maxErr<.42)return true;
+ return false;}
+ finish(a){const ph=a.job.physical;
+ if(a.parts){const actual=a.parts.map(b=>({p:V(b.translation()),q:Q(b.rotation()),v:V(b.linvel())})),center=actual[0].p.clone(),q=ph.goalQ.clone(),inv=q.clone().invert(),velocity=actual.reduce((s,x)=>s.add(x.v),new THREE.Vector3()).multiplyScalar(1/6);
+ this.events.layouts[a.layoutKind]--;a.layoutKind=ph.kind;this.events.layouts[a.layoutKind]++;
+ a.layout=actual.map(t=>({p:t.p.clone().sub(center).applyQuaternion(inv).divideScalar(a.scale),q:inv.clone().multiply(t.q)}));a.parts.forEach(b=>this.remove(b));a.parts=null;a.body=this.makeWhole(a,center,q,true);a.body.setLinvel(velocity,true);this.events.reassemblies++;this.events.completedGrafts+=ph.grafted;}
+ a.body.setGravityScale(1,true);a.body.setLinearDamping(.28);a.body.setAngularDamping(.55);a.job=null;a.cool=R(5,12);this.colony.events.moves++;this.events.arrivals++;const p=this.policy[ph.mode];p.n++;p.q+=(Math.max(.1,1-ph.reroutes*.23)-p.q)*.18;
+ // A physical joint can connect two reconstructed chairs if their positions are close.
+ // This creates a multi-chair compound structure without freezing either body in space.
+ const candidates=this.colony.agents.filter(b=>b!==a&&!b.job&&b.body&&b.layoutKind!==0&&this.position(a).distanceTo(this.position(b))<.98&&this.position(a).distanceTo(this.position(b))>.30);
+ if(candidates.length&&this.links.length<(this.mobile?12:28)&&Math.random()<.75){const b=candidates[0];if(!this.links.some(l=>l.a===b||l.b===b)){const p1=V(a.body.translation()),p2=V(b.body.translation()),mid=p1.clone().lerp(p2,.5),q1=Q(a.body.rotation()).invert(),q2=Q(b.body.rotation()).invert();const anchor1=mid.clone().sub(p1).applyQuaternion(q1),anchor2=mid.clone().sub(p2).applyQuaternion(q2);const data=RAPIER.JointData.fixed(anchor1,q1,anchor2,q2);const joint=this.world.createImpulseJoint(data,a.body,b.body,true);this.links.push({a,b,joint,age:0,life:R(18,65)});this.events.links++;}}}
+ tick(dt,activity){this.clock+=dt;const c=this.colony;c.clock+=dt;
+ const all=c.agents.filter(a=>a.body&&!a.job);
+ for(const a of c.agents)a.cool=Math.max(0,a.cool-dt*activity);
+ // Very weak centring only for objects which drift far out of the pile.
+ for(const a of all){const p=this.position(a),r=Math.hypot(p.x,p.z);if(r>7){const f=new THREE.Vector3(-p.x,0,-p.z).normalize().multiplyScalar(dt*a.body.mass()*(r-7)*.45);a.body.applyImpulse(f,true);}}
+ if(this.clock>this.settling&&all.length){
+ if(!this.front||this.clock>this.nextFront)this.chooseFront(all);
+ const cap=Math.max(2,Math.round((this.mobile?4:9)*activity));
+ if(this.active.length<cap&&Math.random()<dt*2.4*activity){const a=this.choose(all);if(a){this.plan(a,all);const b=this.active.length+2<=cap&&Math.random()<.65?this.choose(all.filter(x=>x!==a),a.style,this.position(a)):null;if(b){this.plan(b,all);this.start(a,true);this.start(b,true);this.graft(a,b);}else this.start(a);}}
+ }
+ for(const l of [...this.links]){l.age+=dt;if(l.age>l.life){this.world.removeImpulseJoint(l.joint,true);this.links.splice(this.links.indexOf(l),1);this.events.breaks++;}}
+ const done=[];for(const a of this.active)if(this.updateJob(a,dt))done.push(a);
+ this.world.step(this.queue);this.queue.drainCollisionEvents((h1,h2,started)=>{if(started&&this.colliders.get(h1)!==this.colliders.get(h2))this.events.collisions++;});
+ for(const a of done)this.finish(a);this.active=this.active.filter(a=>a.job);c.jobs=this.active;
+ }
  step(dt,activity){this.acc=Math.min(.075,this.acc+dt);let n=0;while(this.acc>=1/60&&n++<4){this.tick(1/60,activity);this.acc-=1/60;}}
- snapshot(){return {...this.colony.snapshot(),physics:{mode:this.mode,learning:JSON.parse(JSON.stringify(this.policy)),active:this.active.length,looseParts:this.active.reduce((n,a)=>n+(a.parts?6:0),0),...this.events}};}
+ snapshot(){return {...this.colony.snapshot(),physics:{mode:this.clock<this.settling?'settling':this.mode,linksActive:this.links.length,learning:JSON.parse(JSON.stringify(this.policy)),active:this.active.length,looseParts:this.active.reduce((n,a)=>n+(a.parts?6:0),0),...this.events}};}
 }

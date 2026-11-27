@@ -15,11 +15,11 @@ export function chairModels(){
  const woodMap=wood();const bump=woodMap.clone();bump.colorSpace=THREE.NoColorSpace;bump.needsUpdate=true;const mat=new THREE.MeshPhysicalMaterial({map:woodMap,bumpMap:bump,bumpScale:.006,roughness:.54,metalness:0,clearcoat:.30,clearcoatRoughness:.28});
  const cloth=new THREE.MeshStandardMaterial({roughness:.94,map:texture((c,n)=>{c.fillStyle='#c7bfb4';c.fillRect(0,0,n,n);for(let i=0;i<n;i+=3){c.fillStyle='rgba(40,30,20,.10)';c.fillRect(i,0,1,n);c.fillRect(0,i,n,1);}})});
  const models=[];
- for(let style=0;style<12;style++){
-  const w=.40+(style%4)*.037,d=.40+(style%3)*.025,h=.43+(style%5)*.032,seatY=-.035,backZ=-d*.46,th=.026+(style%3)*.005,round=style%3===1||style%4===2;
-  const upholstered=style===3||style===6||style===9||style===11,arms=style===5||style===9;
+ for(let style=0;style<24;style++){
+  const w=.36+(style%7)*.025,d=.36+((style*3)%8)*.018,h=.37+((style*5)%9)*.031,seatY=-.035,backZ=-d*.46,th=.020+(style%5)*.004,round=style%3===1||style%4===2;
+  const upholstered=[3,6,9,11,14,17,21,23].includes(style),arms=[5,9,13,19,23].includes(style);
   const parts=[];const seat=[chairBox(w,.065,d,0,seatY,0)];
-  if(style===4||style===8){seat.length=0;for(let k=0;k<6;k++)seat.push(chairBox(w/6-.003,.045,d,-w/2+w/12+k*w/6,seatY,0));seat.push(chairBox(w,.045,.035,0,seatY-.012,-d*.43),chairBox(w,.045,.035,0,seatY-.012,d*.43));}
+  if([4,8,12,20].includes(style)){seat.length=0;for(let k=0;k<6;k++)seat.push(chairBox(w/6-.003,.045,d,-w/2+w/12+k*w/6,seatY,0));seat.push(chairBox(w,.045,.035,0,seatY-.012,-d*.43),chairBox(w,.045,.035,0,seatY-.012,d*.43));}
   const back=[],top=h+.04;for(const x of [-w*.43,w*.43])back.push(beam([x,seatY,backZ],[x*1.04,top,backZ-.06],th,th*.85,round));
   if(style%4===1){back.push(tube([[-w*.45,.11,backZ],[-w*.49,top-.035,backZ-.04],[0,top+.07,backZ-.06],[w*.49,top-.035,backZ-.04],[w*.45,.11,backZ]],th));for(let j=-2;j<=2;j++)back.push(beam([j*w*.14,.11,backZ],[j*w*.16,top+.015,backZ-.06],.012,.009,true));}
   else if(style%4===2){back.push(chairBox(w*.90,.058,.044,0,top-.025,backZ-.05));for(let j=0;j<5;j++)back.push(beam([(j-2)*w*.145,.065,backZ],[(j-2)*w*.15,top-.045,backZ-.05],.012,.01,true));back.push(chairBox(w*.83,.043,.036,0,.095,backZ));}
@@ -27,7 +27,7 @@ export function chairModels(){
   if(arms)for(const x of [-w*.54,w*.54]){back.push(beam([x,.18,d*.32],[x,.23,backZ],.023,.025,true),beam([x,seatY,d*.28],[x,.18,d*.32],.019,.019,true));}
   parts.push({geo:join(seat),anchor:V(0,seatY,0),cloth:false});parts.push({geo:join(back),anchor:V(0,top*.5,backZ),cloth:false});
   for(let j=0;j<4;j++){const x=(j%2?1:-1)*w*.40,z=(j<2?1:-1)*d*.40,xx=x*(style%2?1.17:1.06),zz=z*1.13;const gs=[beam([x,seatY-.02,z],[xx,-.49,zz],th,th*.66,round)];if(style%3===1&&j<2)gs.push(beam([x,-.23,z],[x,-.23,-z],.013,.013,true));else if(style%3!==1&&j===0)gs.push(beam([x,-.24,z],[-x,-.24,z],.013,.013,round));parts.push({geo:join(gs),anchor:V(x,-.25,z),cloth:false});}
-  const pad=upholstered?chairBox(w*.92,.055,d*.90,0,seatY+.055,0):null;
+  const pad=upholstered?chairBox(w*.92,.055+(style%3)*.013,d*.90,0,seatY+.055,0):null;
   const finish=mat.clone();finish.roughness=.39+(style%5)*.075;finish.clearcoat=.16+(style%4)*.095;models.push({parts,pad,mat:finish,cloth,upholstered});
  }
  return models;
