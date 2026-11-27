@@ -8,11 +8,11 @@ function stone(){return texture((c,n)=>{c.fillStyle='#cfc5b4';c.fillRect(0,0,n,n
 function glass(){return texture((c,n)=>{const g=c.createLinearGradient(0,0,n,n);g.addColorStop(0,'#9baeb5');g.addColorStop(.32,'#44555c');g.addColorStop(.65,'#263438');g.addColorStop(1,'#777c72');c.fillStyle=g;c.fillRect(0,0,n,n);c.fillStyle='rgba(205,226,232,.14)';for(let i=0;i<7;i++){c.beginPath();c.moveTo(i*50-60,0);c.lineTo(i*50-20,0);c.lineTo(i*50-100,n);c.lineTo(i*50-130,n);c.fill();}c.fillStyle='rgba(236,196,131,.08)';c.fillRect(n*.12,n*.35,n*.32,n*.55);});}
 function boxGeo(w,h,d,x,y,z){const g=new THREE.BoxGeometry(w,h,d);g.translate(x,y,z);g.userData.colliders=[{p:[x,y,z],q:[0,0,0,1],h:[w/2,h/2,d/2]}];return g;}
 function chairBox(w,h,d,x,y,z){const g=new RoundedBoxGeometry(w,h,d,1,Math.min(.009,w*.18,h*.18,d*.18));g.translate(x,y,z);g.userData.colliders=[{p:[x,y,z],q:[0,0,0,1],h:[w/2,h/2,d/2]}];return g;}
-function beam(a,b,r1,r2=r1,round=false){a=V(...a);b=V(...b);const d=b.clone().sub(a);const g=round?new THREE.CylinderGeometry(r2,r1,d.length(),9,1):new THREE.BoxGeometry(r1*2,d.length(),r1*2);const q=new THREE.Quaternion().setFromUnitVectors(V(0,1,0),d.clone().normalize()),p=a.add(b).multiplyScalar(.5);g.applyQuaternion(q);g.translate(...p.toArray());g.userData.colliders=[{p:p.toArray(),q:q.toArray(),h:[Math.max(r1,r2),d.length()/2,Math.max(r1,r2)]}];return g;}
+function beam(a,b,r1,r2=r1,round=false){a=V(...a);b=V(...b);const d=b.clone().sub(a);const g=round?new THREE.CylinderGeometry(r2,r1,d.length(),12,1):new RoundedBoxGeometry(r1*2,d.length(),r1*2,1,Math.min(.004,r1*.22));const uv=g.attributes.uv;for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*.46,uv.getY(i)*Math.max(.55,d.length()*2.4));const q=new THREE.Quaternion().setFromUnitVectors(V(0,1,0),d.clone().normalize()),p=a.add(b).multiplyScalar(.5);g.applyQuaternion(q);g.translate(...p.toArray());g.userData.colliders=[{p:p.toArray(),q:q.toArray(),h:[Math.max(r1,r2),d.length()/2,Math.max(r1,r2)]}];return g;}
 function tube(points,r){const path=new THREE.CatmullRomCurve3(points.map(p=>V(...p)));const g=new THREE.TubeGeometry(path,Math.max(8,points.length*3),r,8,false);g.userData.colliders=[];const n=Math.max(3,points.length);for(let i=0;i<n;i++){const a=path.getPoint(i/n),b=path.getPoint((i+1)/n),d=b.clone().sub(a),q=new THREE.Quaternion().setFromUnitVectors(V(0,1,0),d.clone().normalize());g.userData.colliders.push({p:a.add(b).multiplyScalar(.5).toArray(),q:q.toArray(),h:[r,d.length()/2+r*.25,r]});}return g;}
 function join(gs){const expanded=gs.map(x=>x.index?x.toNonIndexed():x);const g=mergeGeometries(expanded,false);g.userData.colliders=gs.flatMap(x=>x.userData.colliders||[]);expanded.forEach((x,i)=>{if(x!==gs[i])x.dispose();});gs.forEach(x=>x.dispose());return g;}
 export function chairModels(){
- const woodMap=wood();const bump=woodMap.clone();bump.colorSpace=THREE.NoColorSpace;bump.needsUpdate=true;const mat=new THREE.MeshPhysicalMaterial({map:woodMap,bumpMap:bump,bumpScale:.006,roughness:.48,metalness:0,clearcoat:.24,clearcoatRoughness:.38});
+ const woodMap=wood();const bump=woodMap.clone();bump.colorSpace=THREE.NoColorSpace;bump.needsUpdate=true;const mat=new THREE.MeshPhysicalMaterial({map:woodMap,bumpMap:bump,bumpScale:.006,roughness:.54,metalness:0,clearcoat:.30,clearcoatRoughness:.28});
  const cloth=new THREE.MeshStandardMaterial({roughness:.94,map:texture((c,n)=>{c.fillStyle='#c7bfb4';c.fillRect(0,0,n,n);for(let i=0;i<n;i+=3){c.fillStyle='rgba(40,30,20,.10)';c.fillRect(i,0,1,n);c.fillRect(0,i,n,1);}})});
  const models=[];
  for(let style=0;style<12;style++){
@@ -28,7 +28,7 @@ export function chairModels(){
   parts.push({geo:join(seat),anchor:V(0,seatY,0),cloth:false});parts.push({geo:join(back),anchor:V(0,top*.5,backZ),cloth:false});
   for(let j=0;j<4;j++){const x=(j%2?1:-1)*w*.40,z=(j<2?1:-1)*d*.40,xx=x*(style%2?1.17:1.06),zz=z*1.13;const gs=[beam([x,seatY-.02,z],[xx,-.49,zz],th,th*.66,round)];if(style%3===1&&j<2)gs.push(beam([x,-.23,z],[x,-.23,-z],.013,.013,true));else if(style%3!==1&&j===0)gs.push(beam([x,-.24,z],[-x,-.24,z],.013,.013,round));parts.push({geo:join(gs),anchor:V(x,-.25,z),cloth:false});}
   const pad=upholstered?chairBox(w*.92,.055,d*.90,0,seatY+.055,0):null;
-  models.push({parts,pad,mat,cloth,upholstered});
+  const finish=mat.clone();finish.roughness=.39+(style%5)*.075;finish.clearcoat=.16+(style%4)*.095;models.push({parts,pad,mat:finish,cloth,upholstered});
  }
  return models;
 }
