@@ -16,7 +16,7 @@ export function chairModels(){
  const cloth=new THREE.MeshStandardMaterial({roughness:.94,map:texture((c,n)=>{c.fillStyle='#c7bfb4';c.fillRect(0,0,n,n);for(let i=0;i<n;i+=3){c.fillStyle='rgba(40,30,20,.10)';c.fillRect(i,0,1,n);c.fillRect(0,i,n,1);}})});
  const models=[];
  for(let style=0;style<24;style++){
-  const w=.36+(style%7)*.025,d=.36+((style*3)%8)*.018,h=.37+((style*5)%9)*.031,seatY=-.035,backZ=-d*.46,th=.020+(style%5)*.004,round=style%3===1||style%4===2;
+  const w=.34+(style%7)*.032,d=.33+((style*3)%8)*.026,h=.33+((style*5)%9)*.046,seatY=-.035,backZ=-d*.46,th=.020+(style%5)*.004,round=style%3===1||style%4===2;
   const upholstered=[3,6,9,11,14,17,21,23].includes(style),arms=[5,9,13,19,23].includes(style);
   const parts=[];const seat=[chairBox(w,.065,d,0,seatY,0)];
   if([4,8,12,20].includes(style)){seat.length=0;for(let k=0;k<6;k++)seat.push(chairBox(w/6-.003,.045,d,-w/2+w/12+k*w/6,seatY,0));seat.push(chairBox(w,.045,.035,0,seatY-.012,-d*.43),chairBox(w,.045,.035,0,seatY-.012,d*.43));}

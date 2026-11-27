@@ -4,14 +4,14 @@ import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
-import {PhysicsColony,initPhysics} from './physics.js?v=7';
-import {Colony} from './colony.js?v=7';
-import {chairModels} from './models.js?v=7';
-import {gallery,loadWood,softboxes} from './gallery.js?v=7';
+import {PhysicsColony,initPhysics} from './physics.js?v=8';
+import {Colony} from './colony.js?v=8';
+import {chairModels} from './models.js?v=8';
+import {gallery,loadWood,softboxes} from './gallery.js?v=8';
 const $=id=>document.getElementById(id),stage=$('stage'),status=$('status');
 const mobile=matchMedia('(pointer:coarse)').matches||innerWidth<700,COUNT=mobile?96:240;
 const scene=new THREE.Scene();scene.background=new THREE.Color(0xffffff);scene.fog=new THREE.FogExp2(0xffffff,.015);
-const camera=new THREE.PerspectiveCamera(39,1,.1,140);camera.position.set(7.7,5.5,14.4);
+const camera=new THREE.PerspectiveCamera(39,1,.1,140);camera.position.set(6.9,4.7,11.8);
 let renderer,controls,colony,physics,models,composer,ao,hdrLoaded=false,woodLoaded=false,groups=[],paused=matchMedia('(prefers-reduced-motion: reduce)').matches,activity=1,raf=0,last=0,frame=0,dead=false,visible=true,quality=mobile?1:Math.min(devicePixelRatio,1.65),fps=0,perf=0,perfFrames=0,slow=0;
 const mat=new THREE.Matrix4(),pos=new THREE.Vector3(),scale=new THREE.Vector3(),quat=new THREE.Quaternion(),q2=new THREE.Quaternion(),euler=new THREE.Euler(),col=new THREE.Color(),anchor=new THREE.Vector3();
 const palette=['#55351f','#83502b','#a16b39','#c18c4b','#6c4329','#bb9565','#412d23','#996039','#b77b43','#75503a','#d0ab74','#674933'].map(c=>new THREE.Color(c));
@@ -36,7 +36,7 @@ async function init(){await initPhysics();renderer=new THREE.WebGLRenderer({anti
  light([-9,17,8],mobile?2.0:1.25,true,mobile?1024:2048);light([-3,18,10],.86,!mobile,2048);light([10,8,-7],.55,false,1024);
  gallery(scene);colony=new Colony(COUNT);models=chairModels();physics=new PhysicsColony(colony,models,mobile);setupInstances();updateInstances();loadWood(models).then(ok=>{woodLoaded=ok;if(ok&&paused&&!dead)render();}).catch(console.warn);
  if(!mobile){composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));ao=new GTAOPass(scene,camera,stage.clientWidth,stage.clientHeight);ao.updateGtaoMaterial({radius:.48,samples:16,distanceExponent:1.3,thickness:.14});ao.blendIntensity=.72;composer.addPass(ao);composer.addPass(new OutputPass());}
- controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,2.35,0);controls.enableDamping=true;controls.dampingFactor=.08;controls.minDistance=4.0;controls.maxDistance=40;controls.minPolarAngle=.70;controls.maxPolarAngle=1.54;controls.minAzimuthAngle=-Infinity;controls.maxAzimuthAngle=Infinity;controls.enablePan=false;controls.update();controls.addEventListener('change',()=>{if(paused&&!dead)render();});
+ controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,2.0,0);controls.enableDamping=true;controls.dampingFactor=.08;controls.minDistance=4.0;controls.maxDistance=40;controls.minPolarAngle=.70;controls.maxPolarAngle=1.54;controls.minAzimuthAngle=-Infinity;controls.maxAzimuthAngle=Infinity;controls.enablePan=false;controls.update();controls.addEventListener('change',()=>{if(paused&&!dead)render();});
  let down=null;renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>6)return;const r=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,1-(e.clientY-r.top)/r.height*2),camera);const plane=new THREE.Plane(camera.getWorldDirection(new THREE.Vector3()).negate(),0),p=new THREE.Vector3();plane.setFromNormalAndCoplanarPoint(plane.normal,controls.target);if(ray.ray.intersectPlane(plane,p))colony.disturb(p.toArray());down=null;});
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();dead=true;stop();status.hidden=false;status.textContent='Graphics context lost. Reload to restart.';});
  new ResizeObserver(resize).observe(stage);new IntersectionObserver(([e])=>{visible=e.isIntersecting;if(visible)schedule();else stop();}).observe(stage);resize();render();status.hidden=true;setPause(paused);
